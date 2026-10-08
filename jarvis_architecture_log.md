@@ -12,7 +12,7 @@
 - **Runtime:** Node.js v22.22.0 · npm 10.9.4 (sessão em nuvem, container efêmero)
 - **Workspace Notion:** `Breno's Notion` (`12dd846f-533a-450e-8778-504592474043`)
 - **Integração (bot):** `ClaudeCode` (`3f34414d-ac76-81ff-957c-002778ff3e0b`), tipo *workspace bot*
-- **Última atualização:** 2026-10-08 (sessão 4)
+- **Última atualização:** 2026-10-08 (sessão 5)
 
 ### Estrutura do código
 ```
@@ -226,6 +226,27 @@ Há também cortesia (`SOCIAL`): "oi", "obrigado", "quem é você" recebem respo
 não "não entendi". Responder erro a um cumprimento parece defeito e esfria uma
 interface de conversa. E o "não entendi" assume o limite como próprio — se não
 compreendi, o vocabulário estreito é meu, não culpa de quem escreveu.
+
+### ADR-015 — Uma caixa que parece conversa precisa ser conversa
+Erro de desenho meu, corrigido na sessão 5 com prova em mãos.
+
+Montei o Jarvis Code no topo do Hub como uma caixa cinza recolhida: dentro, uma
+linha de banco para escrever o comando, um checkbox `Enviar`, e um painel de
+resposta. Pareceu um chat. **Não era.** Para funcionar exigia três passos
+manuais e um script que **não roda**, porque a integração `ClaudeCode` continua
+sem acesso ao workspace (seção 3).
+
+A prova de que o desenho enganou: no re-fetch da página, o texto *decorativo* do
+painel de resposta tinha sido editado para `*o que eu faço hola oje?*`. O Breno
+tentou conversar escrevendo dentro do callout — o único campo que parecia
+disponível, e o único que não fazia nada.
+
+**Regra:** uma interface no Notion só deve parecer conversacional se houver algo
+do outro lado respondendo. Enquanto o retorno depender de uma execução manual
+que o usuário não dispara, ela deve ser apresentada como **formulário em
+espera**, com o estado dito em palavras, e não ocupar o lugar mais nobre da
+página. O Jarvis Code foi inteiro para a aba Motor, com o motivo escrito no
+próprio bloco.
 
 ### ADR-013 — Um banco nomeado sempre nasce com aba de tabela em primeiro lugar
 Medido: `notion-create-database` cria um `Default view` de tipo **table**, e ele
@@ -664,7 +685,7 @@ nunca fez. É a mesma troca do item 1.
 | 5 | Lógica pura | ✅ Testada | 176 asserções, `npm test` |
 | 6 | Banco `Compromissos` | ✅ Criado e semeado | 10 blocos; durações pendentes |
 | 7 | Banco `Auditoria de Agentes` | ✅ Criado | Aguarda a primeira auditoria |
-| 8 | Banco `Terminal do Code` | ✅ Criado, 4 exemplos | Renderiza como lista pela via do ADR-013 |
+| 8 | Banco `Terminal do Jarvis Code` | 🟡 Criado, **em espera na aba Motor** | Saiu do topo na sessão 5: parecia conversa sem ser (ADR-015) |
 | 9 | Redesign do Hub | ✅ Aplicado e verificado | Seção 7 |
 | 10 | Galerias com cartão pequeno | ✅ Aplicado | `cardSize: small` confirmado |
 | 11 | `lerCronograma` / `lerCompromissos` | 🟡 Codificado, não validado | Bloqueio da seção 3 |
@@ -806,6 +827,27 @@ Três pedidos do Breno, e o primeiro derrubou uma premissa minha.
 - Verificado por re-fetch que o synced block `9d83ac91…` **sobreviveu à mudança**
   com o mesmo id — era o risco real, porque `IDS.blocos.displayCode` o referencia.
 - **227 asserções** passando (94 + 133).
+
+### 2026-10-08 · Sessão 5 — o Jarvis Code saiu do topo
+- **"Ficou bem analógico e não consegui perguntar."** Procede, e a página provou:
+  o texto decorativo do painel de resposta aparecia editado como
+  `*o que eu faço hola oje?*` — tentativa de conversar dentro de um callout.
+  Ver ADR-015. O erro foi meu: dei aparência de chat a um formulário manual
+  ligado a um script que não roda.
+- Jarvis Code **removido do topo** e movido inteiro para a aba Motor (terminal,
+  display e um callout explicando por que está em espera). Nada foi apagado: o
+  synced block manteve o id `9d83ac91…`, que `IDS.blocos.displayCode` referencia.
+- **Hub Central de Controle expandido para o corpo da página**, visível sem
+  clique. A aba 📊 que o continha foi removida — virou seção própria, logo depois
+  de `## Hoje`.
+- `Como usar` movido do meio do fluxo de dados para junto de `Bastidores`: é
+  manual, não dado, e era um clique exatamente onde o Breno queria enxergar.
+- Topo da página agora, sem nenhum clique: metas e atalhos · **Hoje** ·
+  **Hub Central de Controle** (58 tópicos) · **Próximos marcos** e **Domínio** ·
+  **Pontos fracos**. As 8 abas restantes seguem como material de referência.
+- A anterior `update_content` falhou com "No matches found" porque a página havia
+  mudado — exatamente o comportamento desejado: âncora que não casa não grava
+  nada. Reli e refiz.
 
 **Próxima sessão começa por:**
 1. **O compartilhamento.** `node index.js diagnostico` tem de dar `11/11`. Até
