@@ -12,7 +12,18 @@
 - **Runtime:** Node.js v22.22.0 · npm 10.9.4 (sessão em nuvem, container efêmero)
 - **Workspace Notion:** `Breno's Notion` (`12dd846f-533a-450e-8778-504592474043`)
 - **Integração (bot):** `ClaudeCode` (`3f34414d-ac76-81ff-957c-002778ff3e0b`), tipo *workspace bot*
-- **Última atualização:** 2026-10-08
+- **Última atualização:** 2026-10-08 (sessão 2)
+
+### Estrutura do código
+```
+index.js              ponto de entrada, CLI e API pública
+src/notion.js         transporte, mapa de IDs, normalização, datas, blocos
+src/compromissos.js   blocos de tempo e capacidade real do dia      (item 2)
+src/cronograma.js     leitura do plano diário
+src/revisoes.js       reconciliação das revisões com o Hub          (item 1)
+src/agentes.js        fila de pedidos e loop de autoaperfeiçoamento (item 3)
+test/logica.test.js   94 asserções sobre a lógica pura (`npm test`)
+```
 
 ---
 
@@ -109,32 +120,68 @@ prompt quebre a automação.
 `.env` fica no `.gitignore`; o repositório carrega apenas `.env.example`. O token
 real nunca é logado, nem em erro. O `diagnostico` imprime o nome do bot, nunca a chave.
 
+### ADR-006 — Escritas destrutivas são dry-run por padrão
+`revisoes` e `otimizar` **simulam** por padrão e só gravam com `--aplicar`.
+Ambas sobrescrevem conteúdo que você poderia ter escrito à mão (o campo de
+revisões, as páginas das skills), e um diff na tela custa menos que um
+`Ctrl+Z` em 37 linhas do Notion. A injeção de diretrizes, além disso, só
+acrescenta: nunca apaga o que você escreveu na seção.
+
+### ADR-007 — Duração ausente nunca vale zero
+Um compromisso sem `Duração (h)` não entra como zero no cálculo: o dia inteiro
+passa a `veredito: 'indeterminado'` e o bloco é nomeado em `indeterminados`.
+Tratar ausência como zero daria uma capacidade otimista e silenciosamente
+errada — exatamente a classe de defeito que o item 1 existe para extinguir.
+A premissa é: é melhor dizer "não sei" do que dizer um número errado.
+
+### ADR-008 — Otimizador de prompt plugável
+A síntese da diretriz tem duas implementações. O padrão é **determinístico**,
+por taxonomia de falhas (`src/agentes.js` → `TAXONOMIA`): funciona sem nenhuma
+credencial, é reproduzível e, por ser reproduzível, torna a injeção idempotente.
+O alternativo usa **LLM** e só entra em ação se `ANTHROPIC_API_KEY` existir.
+
+**Medido:** não há credencial de LLM nesta sessão (`ANTHROPIC_API_KEY` ausente;
+`api.anthropic.com` está em `no_proxy`, logo o proxy não injeta nada). Por isso
+o caminho determinístico é o padrão e é o único coberto por testes. O caminho
+por LLM está escrito mas **não exercitado** — se ele falhar em tempo de
+execução, o loop cai no determinístico e registra o motivo, em vez de travar.
+
 ---
 
-## 3. Bloqueio ativo — compartilhamento da integração
+## 3. Bloqueio ativo — compartilhamento na integração certa
 
-**Este é o único impedimento entre o código e os dados reais, e ele é resolvido por você, no Notion.**
+**Status em 2026-10-08, sessão 2: ainda bloqueado. `0/10` bancos alcançáveis.**
 
-A integração `ClaudeCode` autentica com sucesso, mas **nada está compartilhado com ela**:
+As permissões foram concedidas, mas não chegaram à integração que o código usa.
+Há **três bots** neste workspace, e os IDs de dois deles são quase idênticos:
+
+| Bot | ID | Papel |
+|---|---|---|
+| `Notion MCP` | `3f2**4**414d-ac76-8138-951a-0027d53e0c6a` | Conector MCP — é por aqui que o hub foi mapeado |
+| `Make` | `3f2**4**414d-ac76-8162-acf2-0027f2c82356` | Automação do Anki |
+| **`ClaudeCode`** | **`3f3**4**414d-ac76-81ff-957c-002778ff3e0b`** | **A que o `index.js` usa** |
+
+Repare: `ClaudeCode` começa com `3f3**4**`, as outras duas com `3f2**4**`.
+
+Evidência de que a autenticação está certa e só falta o compartilhamento:
 
 ```
-POST /v1/search  →  200 OK, results: []          (zero objetos visíveis)
-GET  /v1/pages/3f24414d…6738b3  →  404
-  "Could not find page … Make sure the relevant pages and databases
-   are shared with your integration \"ClaudeCode\"."
+GET  /v1/users            →  200 OK, lista os 4 usuários do workspace
+GET  /v1/users/me         →  200 OK, "ClaudeCode"
+POST /v1/search           →  200 OK, results: []          ← zero objetos visíveis
+GET  /v1/pages/3f24…38b3  →  404 "Make sure the relevant pages and databases
+                                  are shared with your integration ClaudeCode."
 ```
 
-Os IDs da seção 4 foram obtidos pelo **conector MCP do Notion** (autenticado como
-você, vê o workspace inteiro) — e não pela API da integração. Por isso o mapeamento
-está completo embora a API ainda responda 404.
+**Como liberar:** no Notion, abrir o **Hub Central MED 1.5** → `⋯` (canto
+superior direito) → **Conexões** → procurar **`ClaudeCode`** → Confirmar.
+O acesso é herdado pelas subpáginas, então **um compartilhamento no Hub
+destrava os 10 bancos e as 3 páginas de skill**. Em seguida,
+`node index.js diagnostico` deve mostrar `10/10`.
 
-**Como liberar:** abrir o **Hub Central MED 1.5** no Notion → `⋯` (canto superior
-direito) → **Conexões** / *Connections* → **adicionar `ClaudeCode`**. O acesso é
-herdado por todas as subpáginas e bancos, então **um único compartilhamento no Hub
-destrava os 8 bancos de uma vez**. Depois, `node index.js diagnostico` passa de
-`404` para `✅` em todas as linhas.
-
----
+Os IDs da seção 4 vieram do conector MCP (autenticado como você, vê tudo), e é
+também por ele que os bancos novos foram criados — por isso o mapeamento está
+completo embora a API da integração ainda responda 404.
 
 ## 4. Mapeamento de IDs do Notion
 
@@ -167,6 +214,12 @@ destrava os 8 bancos de uma vez**. Depois, `node index.js diagnostico` passa de
 | Registro de Questões | `b8528bc3d95545bdb62ad7c6e4a0bc7d` | `eedd4b51-07b3-44b6-9071-1e00b30aa1d2` |
 | Fila Anki | `b30fa0bab1d84dc5a4d2767b7ccc6342` | `fd8e8e6d-ee4a-4ec1-9047-4b3cbdc56a4a` |
 | Repositório Clínico e Visual | `f038c9b39ac64baa8a2487598b4fbd63` | `72d53f7b-18bc-4fac-92d6-24d68cd10689` |
+| **Compromissos** ⭐ | `ebb4eacd50eb40249d20cc124a7078b6` | `1de67c6f-c1b3-49f3-a24a-2ed3fb8cc7f3` |
+| **Auditoria de Agentes** ⭐ | `163ee7f987324454a8578e8e0760fb2a` | `8e7588a0-bdc9-4cba-96c3-070aadc93476` |
+
+⭐ criados em 2026-10-08 (sessão 2). `Compromissos` fica sob o Hub e criou a
+relação dual `Compromissos` no Cronograma de Ataque. `Auditoria de Agentes` fica
+sob o `Motor · Claude` e criou a relação dual `Auditorias` no Hub de Controle.
 
 > Views inline (não consultar direto; usar sempre o banco acima): Plano de hoje
 > `3f24414dac76811b884feb9bd6bb791d` · Tópicos de hoje `3f24414dac76818e909cc6dc3a1c29cd`
@@ -217,58 +270,152 @@ Rollups: `Acertos`, `Questões feitas`.
 | `Tópicos` | relation → Hub | Contexto |
 | `Pedido em` | created_time | **readOnly** — nunca escrever |
 
+### Compromissos — leitura (`lerCompromissos`, item 2)
+| Propriedade | Tipo | Uso |
+|---|---|---|
+| `Compromisso` | title | Nome do bloco |
+| `Tipo` | select | Aula · Tutorial · Conferência · Prática · Prova · Atlética/Liga · Treino físico · Outro módulo · Pessoal |
+| `Recorrência` | select | `Única` · `Semanal` · `Quinzenal` |
+| `Dia da semana` | multi_select | Seg…Dom. **Obrigatório** em recorrentes — sem ele o bloco não é alocado |
+| `Vigência` | date | Única: o dia. Recorrente: intervalo de validade |
+| `Hora início` | text | `HH:MM`. Contexto humano e detecção de conflito |
+| `Duração (h)` | number | **AUTORITATIVO** no cálculo. Ausente ⇒ dia indeterminado (ADR-007) |
+| `Inegociável` | checkbox | Bloco que não pode ser remanejado |
+| `Ativo` | checkbox | Filtro padrão da leitura; desmarcar aposenta sem apagar |
+| `Dias no Cronograma` | relation → Cronograma | Reservado |
+
+### Auditoria de Agentes — leitura e escrita (item 3)
+| Propriedade | Tipo | Quem preenche |
+|---|---|---|
+| `Auditoria` | title | Você |
+| `Agente` | select | Você — `Gerar Apostila` · `Rotina diária das 5h` · `Análise semanal` |
+| `Classificação` | select | Você — `✅ Adequado` · `⚠️ Parcial` · `❌ Inadequado` |
+| `Observação` | text | **Você** — é a matéria-prima da diretriz |
+| `Output avaliado` | url | Você |
+| `Status` | select | `📥 Nova` · `⏳ Em análise` · `✅ Aplicada` · `⏸️ Descartada` |
+| `Diretriz gerada` | text | Jarvis |
+| `Aplicado em` | date | Jarvis |
+| `Versão do prompt` | number | Jarvis — contador de diretrizes na skill |
+| `Tópicos` | relation → Hub | Você, opcional |
+
+O loop só consome linhas com `Classificação` ∈ {❌ Inadequado, ⚠️ Parcial} **e**
+`Status` ∈ {📥 Nova, ⏳ Em análise}.
+
 ---
 
-## 6. Proposta aberta — reconciliação cronograma × agenda
+## 6. Correções estruturais — implementadas
 
-**Postura proativa, conforme combinado: estrutura proposta, nada codificado ainda.**
-Isto nasceu da leitura dos schemas, não de um palpite.
+Os três defeitos da seção 6 da sessão 1 foram aprovados e implementados em
+2026-10-08. O que segue é o desenho final de cada um.
 
-### Defeito 1 — `Revisões programadas` é texto livre (prioridade alta)
-O Hub calcula as revisões por **fórmula** (R1 +1 dia, R2 +7, R3 +15 a partir da
-`Data Real de Estudo`, com fallback na `Data Alvo`). O Cronograma guarda as mesmas
-revisões como **texto digitado**. São duas verdades para o mesmo fato.
+### Item 1 · Revisões derivadas, não digitadas → `src/revisoes.js`
 
-No instante em que você estuda um tópico fora do dia previsto e preenche a
-`Data Real de Estudo`, o Hub recalcula sozinho e **o texto do Cronograma fica
-mentindo** — silenciosamente, sem erro visível. Com 58 tópicos × 3 revisões, a
-chance de o cronograma estar desatualizado cresce todo dia.
+**O defeito:** o Hub calculava R1/R2/R3 e a pré-prova por fórmula; o Cronograma
+guardava as mesmas revisões como texto digitado. Duas verdades para o mesmo
+fato, e a do Cronograma envelhecia em silêncio.
 
-**Correção proposta — Agente Sincronizador:** uma função que, para cada dia `D`,
-deriva do Hub quais tópicos têm R1/R2/R3/pré-prova caindo em `D` e reescreve
-`Revisões programadas` + preenche a relation `Tópicos`. O campo passa a ser
-**derivado**, nunca digitado. Roda no começo da rotina das 5h, antes de gerar material.
+**A correção:** `Revisões programadas` deixa de ser digitado e passa a ser
+derivado. Toda linha gravada carrega a marca `⟳ derivado do Hub`, para que
+nunca haja dúvida sobre quem é o autor do campo.
 
-### Defeito 2 — a agenda é prosa (prioridade alta)
-Os compromissos fixos (tutoriais 14h, AC1 26/10 16h30, TBL 23/10 16h30, Mini-OSCE
-12/11 14h, IESC II segundas de manhã, MD 2.5 até 09/10) hoje vivem em tabelas da aba
-*Mapa da prova* e no texto `Eventos do módulo`. Nada disso é consultável por código,
-então **nenhuma automação sabe quantas horas você realmente tem livre num dia**.
-O cronograma prevê 39,5 h na semana de neuro sem subtrair aula nenhuma.
+**Hierarquia de fontes**, nesta ordem:
+1. **Resultado da fórmula do Hub** — é a fonte preferida, porque é a definição
+   que você já mantém. Lida via API, que entrega fórmulas calculadas (o conector
+   MCP devolve só referências opacas `formulaResult://`, por isso o código usa
+   a API e não o MCP).
+2. **Regra documentada no Hub** — R1 +1, R2 +7, R3 +15 a partir da `Data Real
+   de Estudo`, ou da `Data Alvo de Domínio` enquanto ela estiver vazia;
+   pré-prova na véspera da `Data da Prova`.
+3. **Nada** — sem base, nenhuma data é inventada e o tópico é contado em
+   `fontes['sem base']`.
 
-**Duas opções, e eu recomendo a (A):**
+Cada execução informa quantos tópicos vieram de cada fonte. O parser de fórmula
+(`dataDeFormula`) é tolerante de propósito — aceita objeto de data, ISO, ISO
+embutida em texto, `dd/mm/aaaa` e `dd/mm` — porque o tipo de retorno das suas
+fórmulas só será conhecido na primeira leitura real, e um palpite errado
+produziria datas erradas sem avisar.
 
-- **(A) Banco `Compromissos` no Notion** — `Título`, `Início` (datetime), `Fim`,
-  `Tipo` (Tutorial · Conferência · Prática · Prova · Outro módulo · Pessoal),
-  `Recorrência`, relation → `Cronograma de Ataque`.
-  *A favor:* fonte única dentro do hub, sem credencial nova, funciona na rotina das
-  5h mesmo com o PC desligado, e o Jarvis já tem permissão de escrita.
-  *Contra:* os eventos recorrentes precisam ser cadastrados uma vez.
-- **(B) Google Calendar** como fonte. *A favor:* você provavelmente já mantém.
-  *Contra:* mais uma credencial, OAuth a renovar, e some a ligação direta com os tópicos.
+**O que NÃO é tocado:** a relação `Tópicos` do dia. Ela guarda os tópicos de
+*estudo* daquele dia, não os de revisão; sobrescrevê-la destruiria informação.
 
-Com a (A) fecha o ciclo que te interessa: **`Horas` do dia − horas comprometidas =
-capacidade real**; se a capacidade for menor que o plano, o Sincronizador redistribui
-respeitando o teto de 6 h/dia que a regra de adaptação já define, e registra o
-remanejamento no `Diário do Motor`.
+**Estado em 2026-10-08:** `Data Real de Estudo` está vazia nos 58 tópicos, logo
+hoje tudo deriva da `Data Alvo`. Assim que você começar a preencher a data real,
+o reconciliador passa a refletir o seu ritmo de verdade.
 
-### Defeito 3 — gatilhos sem dono (prioridade média)
-`Apostila = 📥 Pedir` no Cronograma e uma linha `📥 Pendente` na Central de Comandos
-são dois caminhos para o mesmo trabalho. Hoje nada garante que o primeiro vire o
-segundo. Proposta: o Jarvis promove todo `📥 Pedir` a um pedido formal na Central de
-Comandos (idempotente, por ADR-003), e a Central passa a ser a **única fila de trabalho**.
+### Item 2 · Tempo livre real → `src/compromissos.js`
 
-**Nada disso entra no código sem seu aval.** Diga qual frente ataco primeiro.
+**O defeito:** a agenda vivia em prosa, então nenhuma automação sabia quantas
+horas você realmente tinha. O cronograma previa 39,5 h na semana de neuro sem
+descontar uma aula.
+
+**A correção:** o banco `Compromissos` e um cálculo explícito por dia.
+
+```
+tempoLivre  = JANELA_UTIL_H − horas comprometidas
+tetoEfetivo = min(TETO_ESTUDO_DIA_H, tempoLivre)
+excesso     = horas planejadas − tetoEfetivo
+```
+
+| Premissa | Padrão | Origem |
+|---|---|---|
+| `JANELA_UTIL_H` | 14 | **Chute meu.** Ajuste à sua rotina — é a premissa mais frágil do modelo |
+| `TETO_ESTUDO_DIA_H` | 6 | Regra de adaptação do `Motor · Claude`: "sem passar de 6 h num dia comum" |
+
+Veredito por dia: `viável` · `sobrecarregado` (com o excesso em horas) ·
+`indeterminado` (algum bloco sem `Duração (h)` — ver ADR-007).
+
+Recorrência: `Única` casa a data; `Semanal` exige dia da semana dentro da
+vigência; `Quinzenal` exige, além disso, número par de semanas desde o início.
+Toda a aritmética de data é feita em UTC para ser determinística, e os rótulos
+de dia da semana são verificados contra os que você já escreveu no Cronograma
+("Seg 12/10", "Sáb 24/10", "Seg 09/11") nos testes.
+
+**Semeado em 2026-10-08:** 10 blocos do calendário do módulo (tutoriais, TBL,
+AC1, AC2, ECG, Mini-OSCE, vistas, IESC II, exame final inativo). As datas e
+horas foram transcritas do Hub; **as durações ficaram em branco de propósito**,
+porque o Hub não as declara e inventá-las produziria contas erradas. Enquanto
+estiverem em branco, esses dias saem como `indeterminado`.
+
+Pendências que só você resolve: duração de cada bloco · hora e duração do
+IESC II · dia da semana do tutorial B4 · se o B4 é subturma B1 (ECG 05/11) ou
+B2 (06/11) · cadastrar Atlética/Liga e treino físico.
+
+### Item 3 · Loop de autoaperfeiçoamento → `src/agentes.js`
+
+**O ciclo:** você classifica um output como `❌ Inadequado` ou `⚠️ Parcial` e
+escreve o que saiu errado → o Jarvis converte a observação em diretriz
+normativa → injeta na página da própria skill → a rotina das 5h, que lê a skill
+antes de gerar material, passa a obedecer.
+
+**Onde a diretriz é injetada:** num bloco *toggle* chamado
+`⟳ Diretrizes aprendidas (mantido pelo Jarvis)`, criado na primeira execução.
+É toggle e não heading porque toggles aceitam filhos — assim a injeção cai
+sempre dentro da seção, sem depender da ordem dos blocos da página.
+
+Cada item injetado fica assim:
+
+> `[2026-10-08 · v3]` **Cortar prosa: no máximo 8 linhas corridas por tópico…**
+> *⟨auditoria: "a apostila ficou longa demais, muito texto corrido"⟩*
+
+A observação literal viaja junto com a diretriz, para que nada se perca na
+tradução e você possa auditar a tradução que o Jarvis fez.
+
+**Garantias:**
+- **Idempotente** — uma diretriz cujo texto já existe na seção não é reinjetada.
+  Isso depende de o otimizador ser determinístico (ADR-008).
+- **Só acrescenta** — o Jarvis nunca apaga o que você escreveu na seção.
+- **Versionado** — `Versão do prompt` na auditoria recebe o contador de
+  diretrizes da skill.
+- **Fecha o ciclo** — a auditoria vai para `✅ Aplicada` com data e diretriz, e
+  o `Diário do Motor` recebe uma linha `Ajuste do Motor`.
+
+**Taxonomia de falhas** (`TAXONOMIA`): 12 padrões reconhecidos — prolixidade,
+falta de esquema, falta de cálculo, superficialidade, falta de clínica, cards
+grandes, erro factual, pegadinhas ausentes, embriologia ausente, formato,
+questões e SNA transversal. Mais de um padrão pode casar na mesma observação, e
+todas as diretrizes correspondentes entram. Sem padrão reconhecido, a sua
+observação vira a regra, literal — como *restrição dura* se a classificação foi
+`❌ Inadequado`, como *ajuste* se foi `⚠️ Parcial`.
 
 ---
 
@@ -276,34 +423,75 @@ Comandos (idempotente, por ADR-003), e a Central passa a ser a **única fila de 
 
 | # | Integração | Status | Nota |
 |---|---|---|---|
-| 1 | Autenticação na API do Notion | ✅ Operacional | Via injeção do proxy; `users/me` → `ClaudeCode` |
-| 2 | Transporte axios + shim do SDK | ✅ Operacional | ADR-001 |
-| 3 | Mapeamento de IDs do hub | ✅ Completo | 9 páginas, 8 bancos (seção 4) |
-| 4 | `diagnostico()` | ✅ Operacional | Distingue `400` de `404`, varre os 8 bancos |
-| 5 | `lerCronograma()` | 🟡 Codificado, não validado | Espera o compartilhamento da seção 3 |
-| 6 | `gerenciarAgente()` | 🟡 Codificado, não validado | Idem |
-| 7 | Reconciliação cronograma × agenda | ⬜ Proposto | Seção 6, aguarda decisão |
-| 8 | Banco `Compromissos` | ⬜ Proposto | Seção 6, opção (A) |
-| 9 | Promoção de `📥 Pedir` → Central | ⬜ Proposto | Seção 6, defeito 3 |
-| 10 | Ponte Anki (`sincronizar_anki.bat`) | ⬜ Fora de escopo | Vive no Make, não tocar ainda |
+| 1 | Autenticação na API do Notion | ✅ Operacional | `users/me` e `users` respondem 200 |
+| 2 | Transporte axios + shim do SDK | ✅ Operacional | ADR-001, verificado |
+| 3 | Mapeamento de IDs do hub | ✅ Completo | 9 páginas, 10 bancos |
+| 4 | `diagnostico()` | ✅ Operacional | 10 bancos + 3 páginas de skill |
+| 5 | Lógica pura (datas, capacidade, derivação, taxonomia) | ✅ Testada | 94 asserções, `npm test` |
+| 6 | Banco `Compromissos` | ✅ Criado e semeado | 10 blocos; durações pendentes |
+| 7 | Banco `Auditoria de Agentes` | ✅ Criado | Aguarda a primeira auditoria sua |
+| 8 | `lerCronograma()` / `lerCompromissos()` | 🟡 Codificado, não validado | Bloqueio da seção 3 |
+| 9 | `reconciliarRevisoes()` | 🟡 Codificado, não validado | Dry-run por padrão (ADR-006) |
+| 10 | `otimizarAgentes()` — determinístico | 🟡 Codificado, lógica testada | Injeção não validada; dry-run por padrão |
+| 11 | `otimizarAgentes()` — por LLM | ⬜ Escrito, não exercitado | Sem credencial nesta sessão (ADR-008) |
+| 12 | Promoção de `📥 Pedir` → Central de Comandos | ⬜ Não começou | Defeito 3 da sessão 1, ainda aberto |
+| 13 | Ponte Anki (`sincronizar_anki.bat`) | ⬜ Fora de escopo | Vive no Make |
 
-Legenda: ✅ operacional e verificado · 🟡 escrito, verificação bloqueada · ⬜ não começou
+Legenda: ✅ operacional e verificado · 🟡 escrito, verificação bloqueada ·
+⬜ não começou
+
+**Leitura honesta do estado:** toda a lógica que pode ser testada sem a API
+está testada. Nenhum caminho de escrita foi exercitado contra o seu Notion,
+porque a integração `ClaudeCode` não vê nada ainda. É exatamente por isso que
+as duas escritas destrutivas são dry-run por padrão: a primeira execução real
+vai te mostrar o diff antes de tocar em qualquer coisa.
 
 ---
 
 ## 8. Diário de bordo
 
 ### 2026-10-08 · Sessão 1 — fundação
-- Reconhecimento do ambiente: Node 22.22, repositório vazio (nenhum commit), branch correta.
+- Reconhecimento do ambiente: Node 22.22, repositório vazio, branch correta.
 - Descoberto que **não há `NOTION_TOKEN` no ambiente**; a autenticação é injetada pelo proxy.
 - Testada a autenticação: bot `ClaudeCode` no workspace `Breno's Notion`. ✅
 - **Medido** que o SDK falha e o axios funciona por causa do proxy → ADR-001.
 - **Medido** que `/v1/data_sources/*` não existe para esta integração → ADR-002.
-- `POST /v1/search` retorna vazio → identificado o bloqueio de compartilhamento (seção 3).
-- Hub mapeado pelo conector MCP: 9 páginas, 8 bancos, schemas completos (seções 4 e 5).
+- `POST /v1/search` retorna vazio → identificado o bloqueio de compartilhamento.
+- Hub mapeado pelo conector MCP: 9 páginas, 8 bancos, schemas completos.
 - Instalados `@notionhq/client@5.27.0` e `axios@1.20.0`.
 - Escritos `index.js` (diagnóstico + `lerCronograma` + `gerenciarAgente`) e este log.
-- Identificados 3 defeitos estruturais e proposta a correção (seção 6) — **não codificados**.
+- Identificados 3 defeitos estruturais e proposta a correção — não codificados.
 
-**Próxima sessão começa por:** confirmar se o compartilhamento foi feito
-(`node index.js diagnostico`); depois, a decisão do Breno sobre a seção 6.
+### 2026-10-08 · Sessão 2 — as três correções estruturais
+- Permissões anunciadas, mas o diagnóstico seguiu em `0/8`. Investigado: existem
+  **três bots** no workspace e o compartilhamento não chegou ao `ClaudeCode`.
+  `GET /v1/users` responde 200 (autenticação ok) e `POST /v1/search` segue
+  vazio (zero objetos). Registrado na seção 3 com a tabela de desambiguação.
+- Decidido não travar: o trabalho estrutural foi feito pelo conector MCP, que
+  tem acesso pleno, e o código foi escrito para a API, que passa a funcionar
+  assim que o compartilhamento certo for feito.
+- **Medido** que o MCP devolve fórmulas como referências opacas
+  (`formulaResult://`), enquanto a API REST as entrega calculadas → confirmou
+  que o item 1 deve ler as fórmulas pela API.
+- **Medido** que não há credencial de LLM na sessão → ADR-008, otimizador plugável.
+- Criados os bancos `Compromissos` (sob o Hub) e `Auditoria de Agentes` (sob o
+  `Motor · Claude`), com relações duais para o Cronograma e para o Hub.
+- Semeados 10 blocos do calendário do módulo em `Compromissos`, com datas e
+  horas transcritas do Hub e **durações deliberadamente em branco**.
+- Código refatorado em 5 módulos sob `src/` — três features novas num só
+  arquivo seria dívida técnica.
+- Implementados os itens 1, 2 e 3 (desenho na seção 6).
+- Escrita a suíte `test/logica.test.js`: **94 asserções, todas passando**,
+  ancoradas em dados reais do Hub (os rótulos de dia da semana do Cronograma
+  servem de verdade de referência para a aritmética de datas).
+- Três asserções minhas estavam erradas e foram corrigidas; uma delas revelou
+  um comportamento que valia asseverar melhor: um mesmo dia acumula marcadores
+  diferentes (13/10 recebe R1 de F04/F05 e R2 de N03).
+
+**Próxima sessão começa por:**
+1. `node index.js diagnostico` — confirmar se o compartilhamento chegou ao `ClaudeCode`.
+2. `node index.js revisoes` (dry-run) — ler o diff antes de aplicar.
+3. Preencher as durações em `Compromissos` e resolver as pendências do item 2.
+4. Primeira auditoria real para exercitar o loop do item 3 ponta a ponta.
+5. Defeito 3 ainda aberto: promover `📥 Pedir` do Cronograma a pedido formal
+   na Central de Comandos, fazendo dela a única fila de trabalho.

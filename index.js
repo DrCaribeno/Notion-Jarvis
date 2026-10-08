@@ -1,388 +1,54 @@
 /**
- * Jarvis · Núcleo de automação do Notion
- * ------------------------------------------------------------------
- * Antes de alterar este arquivo, leia `jarvis_architecture_log.md`.
- * As decisões não óbvias daqui (axios como transporte, Notion-Version
- * fixada em 2022-06-28) estão justificadas lá como ADR-001 e ADR-002.
+ * Jarvis · ecossistema de automação do Notion — ponto de entrada e CLI.
+ *
+ * Antes de alterar qualquer coisa aqui, leia `jarvis_architecture_log.md`.
+ * As decisões não óbvias (axios como transporte, Notion-Version fixada,
+ * revisões derivadas em vez de digitadas) estão justificadas lá.
+ *
+ * Módulos:
+ *   src/notion.js       transporte, IDs, normalização, datas, blocos
+ *   src/compromissos.js blocos de tempo e capacidade real do dia
+ *   src/cronograma.js   leitura do plano diário
+ *   src/revisoes.js     reconciliação das revisões com o Hub
+ *   src/agentes.js      fila de pedidos e loop de autoaperfeiçoamento
  */
 
 'use strict';
 
-const axios = require('axios');
-const { Client } = require('@notionhq/client');
+const N = require('./src/notion');
+const Compromissos = require('./src/compromissos');
+const Cronograma = require('./src/cronograma');
+const Revisoes = require('./src/revisoes');
+const Agentes = require('./src/agentes');
 
-// ── Configuração ──────────────────────────────────────────────────
-
-const NOTION_VERSION = '2022-06-28'; // ADR-002: data_sources indisponível p/ esta integração
-const BASE_URL = 'https://api.notion.com/v1';
-
-/**
- * ADR-001: nesta sessão o agent proxy injeta o header Authorization nas
- * requisições para api.notion.com, então o token local é um placeholder.
- * Na sua máquina não há proxy e o NOTION_TOKEN do .env é usado de verdade.
- * O mesmo código serve aos dois ambientes.
- */
-const NOTION_TOKEN = process.env.NOTION_TOKEN || 'proxy-injected-placeholder';
-
-/** Mapa de IDs — espelha a seção 4 do log de arquitetura. Única fonte de verdade. */
-const IDS = {
-  paginas: {
-    hub: '3f24414dac76812abcf5d0285b6738b3',
-    motor: '3f24414dac76814f939ccc7e2b7cefcc',
-    perfil: '3f24414dac7681adb316e534fb21dddd',
-    indiceMateriais: '3f24414dac768103bd26ff0839c241b7',
-    skillGerarApostila: '3f24414dac768199a591e16b34590b22',
-    skillRotina5h: '3f24414dac7681f4b803fa4e7f5510e3',
-    skillAnaliseSemanal: '3f24414dac7681a39f2accf2432eb736',
-    blueprintAutomacao: '3f24414dac768129a7dcda035dec69e6',
-  },
-  bancos: {
-    cronograma: '2b274f511f8e4409b0322f6a0f4b7043',
-    hubControle: 'c4891265091e45b794551d561b969fab',
-    centralComandos: '637e5706ca2343df8044326c1b517c91',
-    diarioMotor: '9975790b8f8149529b92884b242ee36b',
-    bibliotecaApostilas: '55d58868acc641a58708c6dfc0ce39e8',
-    registroQuestoes: 'b8528bc3d95545bdb62ad7c6e4a0bc7d',
-    filaAnki: 'b30fa0bab1d84dc5a4d2767b7ccc6342',
-    repositorioVisual: 'f038c9b39ac64baa8a2487598b4fbd63',
-  },
-  /** data_source_id para a migração futura à API 2025-09-03 (ADR-002). */
-  colecoes: {
-    cronograma: 'af17ee56-06ee-40b7-89ac-1899d3ed7b1b',
-    hubControle: 'a374d5c8-4f9a-48fc-946e-4883b4f039ec',
-    centralComandos: 'a4b69910-a163-4042-9a06-b2f6699343b6',
-    diarioMotor: '0bd5b810-3fa5-4ea3-8fa9-813bd72da4fe',
-    bibliotecaApostilas: 'f6e5eb83-b268-4ff8-aa0f-c639239def90',
-    registroQuestoes: 'eedd4b51-07b3-44b6-9071-1e00b30aa1d2',
-    filaAnki: 'fd8e8e6d-ee4a-4ec1-9047-4b3cbdc56a4a',
-    repositorioVisual: '72d53f7b-18bc-4fac-92d6-24d68cd10689',
-  },
-};
-
-/** Valores de select aceitos pela Central de Comandos (seção 5 do log). */
-const COMANDOS = Object.freeze([
-  'Gerar apostila', 'Mini-apostila de correção', 'Questões extras', 'Cards extras',
-  'Tirar dúvida', 'Ajustar cronograma', 'Análise semanal', 'Outro',
-]);
-const STATUS_PEDIDO = Object.freeze({
-  pendente: '📥 Pendente',
-  emAndamento: '⏳ Em andamento',
-  feito: '✅ Feito',
-  precisoInfo: '↩️ Preciso de info',
-});
-
-// ── Transporte ────────────────────────────────────────────────────
-
-/** Instância axios — o transporte real de tudo (ADR-001). */
-const http = axios.create({
-  baseURL: BASE_URL,
-  timeout: 30000,
-  headers: {
-    Authorization: `Bearer ${NOTION_TOKEN}`,
-    'Notion-Version': NOTION_VERSION,
-    'Content-Type': 'application/json',
-  },
-});
-
-/**
- * SDK oficial apoiado no axios. Sem este shim, o fetch nativo do Node furaria
- * o proxy e receberia 401 (ADR-001). Com ele, o SDK fica disponível para os
- * endpoints de conveniência sem abrir mão da autenticação.
- */
-const notion = new Client({
-  auth: NOTION_TOKEN,
-  notionVersion: NOTION_VERSION,
-  fetch: async (url, init = {}) => {
-    const resposta = await http.request({
-      url: String(url).replace(BASE_URL, ''),
-      method: init.method || 'GET',
-      data: init.body ? JSON.parse(init.body) : undefined,
-      validateStatus: () => true, // o SDK interpreta o status por conta própria
-    });
-    return new Response(JSON.stringify(resposta.data), {
-      status: resposta.status,
-      headers: { 'content-type': 'application/json' },
-    });
-  },
-});
-
-/** Converte um erro da API em algo que explica a si mesmo. */
-function traduzirErro(erro, contexto) {
-  const status = erro.response?.status;
-  const dados = erro.response?.data || {};
-  const base = `[${contexto}] ${status || erro.code || 'erro'}: ${dados.message || erro.message}`;
-
-  // Diagnósticos acionáveis — a diferença entre 400 e 404 importa (ADR-002).
-  if (status === 404) {
-    return new Error(`${base}\n  → O objeto existe mas não está compartilhado com a integração ` +
-      `"ClaudeCode". Compartilhe o Hub Central MED 1.5 (seção 3 do log de arquitetura).`);
-  }
-  if (status === 400 && dados.code === 'invalid_request_url') {
-    return new Error(`${base}\n  → Rota indisponível para esta integração. Confira NOTION_VERSION (ADR-002).`);
-  }
-  if (status === 401) {
-    return new Error(`${base}\n  → Token inválido. Fora da sessão em nuvem, defina NOTION_TOKEN no .env.`);
-  }
-  return new Error(base);
-}
-
-// ── Normalização de propriedades ──────────────────────────────────
-
-/**
- * Achata uma propriedade do Notion no valor JavaScript correspondente.
- * Sem isto, todo consumidor precisaria conhecer o formato interno de cada tipo.
- */
-function lerPropriedade(prop) {
-  if (!prop) return null;
-  switch (prop.type) {
-    case 'title':
-    case 'rich_text':
-      return (prop[prop.type] || []).map((t) => t.plain_text).join('') || null;
-    case 'number':
-      return prop.number;
-    case 'checkbox':
-      return prop.checkbox;
-    case 'select':
-      return prop.select?.name ?? null;
-    case 'status':
-      return prop.status?.name ?? null;
-    case 'multi_select':
-      return (prop.multi_select || []).map((o) => o.name);
-    case 'date':
-      return prop.date ? { inicio: prop.date.start, fim: prop.date.end } : null;
-    case 'url':
-      return prop.url;
-    case 'relation':
-      return (prop.relation || []).map((r) => r.id);
-    case 'created_time':
-      return prop.created_time;
-    case 'last_edited_time':
-      return prop.last_edited_time;
-    case 'formula': {
-      const f = prop.formula || {};
-      return f[f.type] ?? null;
-    }
-    case 'rollup': {
-      const r = prop.rollup || {};
-      if (r.type === 'array') return (r.array || []).map(lerPropriedade);
-      return r[r.type] ?? null;
-    }
-    default:
-      return null;
-  }
-}
-
-/** Achata todas as propriedades de uma página. */
-function lerPropriedades(pagina) {
-  const saida = {};
-  for (const [nome, prop] of Object.entries(pagina.properties || {})) {
-    saida[nome] = lerPropriedade(prop);
-  }
-  return saida;
-}
-
-/** Consulta um banco paginando até o fim — a API devolve no máximo 100 por vez. */
-async function consultarBanco(bancoId, corpo = {}, contexto = 'consultarBanco') {
-  const paginas = [];
-  let cursor;
-  do {
-    try {
-      const { data } = await http.post(`/databases/${bancoId}/query`, {
-        ...corpo,
-        page_size: 100,
-        ...(cursor ? { start_cursor: cursor } : {}),
-      });
-      paginas.push(...data.results);
-      cursor = data.has_more ? data.next_cursor : undefined;
-    } catch (erro) {
-      throw traduzirErro(erro, contexto);
-    }
-  } while (cursor);
-  return paginas;
-}
-
-// ── FUNÇÃO 1 · Leitura do cronograma ──────────────────────────────
-
-/**
- * Lê o Cronograma de Ataque com as propriedades e o status de cada dia.
- *
- * @param {object} [opcoes]
- * @param {string} [opcoes.de]        Data inicial ISO `YYYY-MM-DD` (inclusive)
- * @param {string} [opcoes.ate]       Data final ISO `YYYY-MM-DD` (inclusive)
- * @param {boolean} [opcoes.hoje]     Atalho para o dia de hoje
- * @param {boolean} [opcoes.pendentes] Apenas dias ainda não marcados como Feito
- * @param {string} [opcoes.semana]    Filtra por uma opção de `Semana`
- * @returns {Promise<Array<object>>}  Dias normalizados, em ordem cronológica
- */
-async function lerCronograma(opcoes = {}) {
-  const { de, ate, hoje, pendentes, semana } = opcoes;
-  const condicoes = [];
-
-  // `É hoje` é fórmula e não é filtrável por SQL; filtramos por `Data` (seção 5).
-  const dataHoje = new Date().toISOString().slice(0, 10);
-  if (hoje) {
-    condicoes.push({ property: 'Data', date: { equals: dataHoje } });
-  } else {
-    if (de) condicoes.push({ property: 'Data', date: { on_or_after: de } });
-    if (ate) condicoes.push({ property: 'Data', date: { on_or_before: ate } });
-  }
-  if (pendentes) condicoes.push({ property: 'Feito', checkbox: { equals: false } });
-  if (semana) condicoes.push({ property: 'Semana', select: { equals: semana } });
-
-  const paginas = await consultarBanco(
-    IDS.bancos.cronograma,
-    {
-      ...(condicoes.length ? { filter: { and: condicoes } } : {}),
-      sorts: [{ property: 'Data', direction: 'ascending' }],
-    },
-    'lerCronograma',
-  );
-
-  return paginas.map((pagina) => {
-    const p = lerPropriedades(pagina);
-    return {
-      id: pagina.id,
-      url: pagina.url,
-      dia: p['Dia'],
-      data: p['Data']?.inicio ?? null,
-      semana: p['Semana'],
-      horas: p['Horas'],
-      // Status do dia, derivado de duas propriedades distintas.
-      status: {
-        feito: p['Feito'] === true,
-        apostila: p['Apostila'],           // 📥 Pedir · ⏳ Gerando · ✅ Pronta
-        atrasado: p['Feito'] !== true && p['Data']?.inicio
-          ? p['Data'].inicio < dataHoje
-          : false,
-      },
-      plano: {
-        ler: p['Ler'],
-        esquematizar: p['Resumir / Esquematizar'],
-        exercicio: p['Exercício ativo'],
-      },
-      revisoesProgramadas: p['Revisões programadas'], // ⚠️ texto livre — defeito 1 do log
-      eventosDoModulo: p['Eventos do módulo'],        // ⚠️ agenda em prosa — defeito 2
-      relacoes: {
-        topicos: p['Tópicos'] || [],
-        apostilaDoDia: p['Apostila do dia'] || [],
-      },
-    };
-  });
-}
-
-// ── FUNÇÃO 2 · Escrita de agentes ─────────────────────────────────
-
-/** Monta o payload de propriedades da Central de Comandos, omitindo o que não veio. */
-function montarPropriedadesPedido({ pedido, comando, status, detalhes, resposta, resultado, concluidoEm, topicos }) {
-  const props = {};
-  if (pedido !== undefined) props['Pedido'] = { title: [{ text: { content: pedido } }] };
-  if (comando !== undefined) props['Comando'] = { select: { name: comando } };
-  if (status !== undefined) props['Status'] = { select: { name: status } };
-  if (detalhes !== undefined) props['Detalhes'] = { rich_text: [{ text: { content: detalhes } }] };
-  if (resposta !== undefined) props['Resposta do Claude'] = { rich_text: [{ text: { content: resposta } }] };
-  if (resultado !== undefined) props['Resultado'] = { url: resultado };
-  if (concluidoEm !== undefined) props['Concluído em'] = { date: { start: concluidoEm } };
-  if (topicos !== undefined) props['Tópicos'] = { relation: topicos.map((id) => ({ id })) };
-  // `Pedido em` é created_time (readOnly) — escrever nela devolve validation_error.
-  return props;
-}
-
-/** Procura um pedido pelo título exato. Base da idempotência (ADR-003). */
-async function buscarPedido(pedido) {
-  const paginas = await consultarBanco(
-    IDS.bancos.centralComandos,
-    { filter: { property: 'Pedido', title: { equals: pedido } }, page_size: 1 },
-    'buscarPedido',
-  );
-  return paginas[0] || null;
-}
-
-/**
- * Cria ou atualiza um pedido de agente na Central de Comandos.
- *
- * Idempotente por ADR-003: se já existir um pedido com o mesmo título, atualiza
- * em vez de duplicar. Chamar duas vezes com a mesma entrada é seguro.
- *
- * @param {object} entrada
- * @param {string} entrada.pedido        Título — também a chave de idempotência
- * @param {string} [entrada.comando]     Um de COMANDOS
- * @param {string} [entrada.status]      Um de STATUS_PEDIDO (padrão: pendente ao criar)
- * @param {string} [entrada.detalhes]    O que se quer, em uma ou duas frases
- * @param {string} [entrada.resposta]    Retorno do agente
- * @param {string} [entrada.resultado]   URL do material gerado
- * @param {string} [entrada.concluidoEm] Data ISO de fechamento
- * @param {string[]} [entrada.topicos]   IDs de páginas do Hub Central de Controle
- * @returns {Promise<{acao:'criado'|'atualizado', id:string, url:string, pedido:string}>}
- */
-async function gerenciarAgente(entrada) {
-  const { pedido, comando, status } = entrada;
-
-  if (!pedido || !String(pedido).trim()) {
-    throw new Error('[gerenciarAgente] `pedido` é obrigatório — é a chave de idempotência.');
-  }
-  if (comando && !COMANDOS.includes(comando)) {
-    throw new Error(`[gerenciarAgente] comando inválido: "${comando}".\n  Aceitos: ${COMANDOS.join(' · ')}`);
-  }
-  const statusValidos = Object.values(STATUS_PEDIDO);
-  if (status && !statusValidos.includes(status)) {
-    throw new Error(`[gerenciarAgente] status inválido: "${status}".\n  Aceitos: ${statusValidos.join(' · ')}`);
-  }
-
-  const existente = await buscarPedido(pedido);
-
-  // Ao criar, um pedido sem status entra como pendente — a fila nunca recebe linha órfã.
-  const propriedades = montarPropriedadesPedido(
-    existente ? entrada : { status: STATUS_PEDIDO.pendente, ...entrada },
-  );
-
-  try {
-    if (existente) {
-      const { data } = await http.patch(`/pages/${existente.id}`, { properties: propriedades });
-      return { acao: 'atualizado', id: data.id, url: data.url, pedido };
-    }
-    const { data } = await http.post('/pages', {
-      parent: { database_id: IDS.bancos.centralComandos },
-      properties: propriedades,
-    });
-    return { acao: 'criado', id: data.id, url: data.url, pedido };
-  } catch (erro) {
-    throw traduzirErro(erro, 'gerenciarAgente');
-  }
-}
+const { IDS, http, notion } = N;
 
 // ── Diagnóstico ───────────────────────────────────────────────────
 
-/**
- * Verifica a autenticação e o alcance real da integração banco por banco.
- * É o primeiro comando a rodar numa sessão nova: diz exatamente o que falta.
- */
 async function diagnostico() {
-  console.log('\n🔎 Jarvis · diagnóstico\n' + '─'.repeat(58));
-  console.log(`Notion-Version : ${NOTION_VERSION}`);
+  console.log('\n🔎 Jarvis · diagnóstico\n' + '─'.repeat(62));
+  console.log(`Notion-Version : ${N.NOTION_VERSION}`);
   console.log(`Token          : ${process.env.NOTION_TOKEN ? 'do ambiente (.env)' : 'injetado pelo proxy'}`);
+  console.log(`Capacidade     : janela ${N.JANELA_UTIL_H}h/dia · teto de estudo ${N.TETO_ESTUDO_DIA_H}h/dia`);
 
-  // 1. Autenticação
   let bot;
   try {
     const { data } = await http.get('/users/me');
     bot = data;
     console.log(`Autenticação   : ✅ "${data.name}" em "${data.bot?.workspace_name}"`);
+    console.log(`Integração     : ${data.id}`);
   } catch (erro) {
-    console.error(`Autenticação   : ❌ ${traduzirErro(erro, 'users/me').message}`);
+    console.error(`Autenticação   : ❌ ${N.traduzirErro(erro, 'users/me').message}`);
     return { ok: false, etapa: 'autenticacao' };
   }
 
-  // 2. Alcance — quantos objetos a integração enxerga
-  let visiveis = 0;
   try {
     const { data } = await http.post('/search', { page_size: 100 });
-    visiveis = data.results.length;
-    console.log(`Objetos visíveis: ${visiveis === 0 ? '⚠️  0' : `✅ ${visiveis}`}`);
+    console.log(`Objetos visíveis: ${data.results.length === 0 ? '⚠️  0' : `✅ ${data.results.length}`}`);
   } catch (erro) {
-    console.log(`Objetos visíveis: ❌ ${traduzirErro(erro, 'search').message}`);
+    console.log(`Objetos visíveis: ❌ ${N.traduzirErro(erro, 'search').message}`);
   }
 
-  // 3. Cada banco, individualmente
   console.log('\nBancos de dados:');
   const relatorio = [];
   for (const [nome, id] of Object.entries(IDS.bancos)) {
@@ -393,25 +59,36 @@ async function diagnostico() {
       relatorio.push({ nome, id, ok: true });
     } catch (erro) {
       const status = erro.response?.status;
-      const motivo = status === 404 ? 'não compartilhado com a integração' :
-        erro.response?.data?.message || erro.message;
+      const motivo = status === 404 ? 'não compartilhado com a integração'
+        : erro.response?.data?.message || erro.message;
       console.log(`  ❌ ${nome.padEnd(20)} ${status || '?'} — ${motivo}`);
       relatorio.push({ nome, id, ok: false, status });
     }
   }
 
+  console.log('\nPáginas de skill (alvo da injeção de diretrizes):');
+  for (const [nome, id] of Object.entries(IDS.agentes)) {
+    try {
+      await http.get(`/pages/${id}`);
+      console.log(`  ✅ ${nome}`);
+    } catch (erro) {
+      console.log(`  ❌ ${nome} — ${erro.response?.status || '?'}`);
+    }
+  }
+
   const alcancaveis = relatorio.filter((r) => r.ok).length;
-  console.log('\n' + '─'.repeat(58));
+  console.log('\n' + '─'.repeat(62));
   console.log(`Alcance: ${alcancaveis}/${relatorio.length} bancos.`);
 
   if (alcancaveis === 0) {
     console.log(
-      '\n⚠️  AÇÃO NECESSÁRIA — um passo manual, só você pode fazer:\n' +
-      '    A integração autentica, mas nada foi compartilhado com ela.\n\n' +
-      '    No Notion, abra o Hub Central MED 1.5 → ⋯ (canto superior direito)\n' +
-      `    → Conexões → adicione "${bot.name}".\n\n` +
-      '    O acesso é herdado pelas subpáginas, então esse único passo\n' +
-      '    destrava os 8 bancos. Depois, rode este diagnóstico de novo.\n',
+      `\n⚠️  AÇÃO NECESSÁRIA — a integração "${bot.name}" (${bot.id})\n` +
+      '    autentica, mas não vê nenhum objeto.\n\n' +
+      '    Há três integrações neste workspace: "Notion MCP", "Make" e "ClaudeCode".\n' +
+      '    O compartilhamento precisa ser NESTA, a ClaudeCode.\n\n' +
+      '    No Notion: abra o Hub Central MED 1.5 → ⋯ (canto superior direito)\n' +
+      '    → Conexões → procure por "ClaudeCode" → Confirmar.\n' +
+      '    O acesso é herdado pelas subpáginas, então um compartilhamento basta.\n',
     );
   } else if (alcancaveis < relatorio.length) {
     console.log('    Compartilhe o Hub Central MED 1.5 para herdar o acesso aos bancos restantes.\n');
@@ -424,6 +101,11 @@ async function diagnostico() {
 
 // ── CLI ───────────────────────────────────────────────────────────
 
+const valorDe = (args, flag) => {
+  const i = args.indexOf(flag);
+  return i !== -1 ? args[i + 1] : undefined;
+};
+
 const COMANDOS_CLI = {
   async diagnostico() {
     const r = await diagnostico();
@@ -431,60 +113,164 @@ const COMANDOS_CLI = {
   },
 
   async cronograma(args) {
-    const hoje = args.includes('--hoje');
-    const pendentes = args.includes('--pendentes');
-    const valor = (flag) => {
-      const i = args.indexOf(flag);
-      return i !== -1 ? args[i + 1] : undefined;
-    };
-    const dias = await lerCronograma({
-      hoje, pendentes, de: valor('--de'), ate: valor('--ate'), semana: valor('--semana'),
+    const dias = await Cronograma.lerCronograma({
+      hoje: args.includes('--hoje'),
+      pendentes: args.includes('--pendentes'),
+      capacidade: args.includes('--capacidade'),
+      de: valorDe(args, '--de'),
+      ate: valorDe(args, '--ate'),
+      semana: valorDe(args, '--semana'),
     });
 
-    console.log(`\n📅 Cronograma de Ataque — ${dias.length} dia(s)\n` + '─'.repeat(58));
+    console.log(`\n📅 Cronograma de Ataque — ${dias.length} dia(s)\n` + '─'.repeat(62));
     for (const d of dias) {
       const marca = d.status.feito ? '✅' : d.status.atrasado ? '🔴' : '⬜';
       console.log(`${marca} ${d.data || '(sem data)'}  ${d.dia || ''}`);
-      if (d.horas) console.log(`     ${d.horas}h · ${d.semana || '—'} · apostila: ${d.status.apostila || '—'}`);
+      if (d.horas) console.log(`     ${d.horas}h planejadas · ${d.semana || '—'} · apostila: ${d.status.apostila || '—'}`);
       if (d.plano.ler) console.log(`     Ler: ${d.plano.ler}`);
       if (d.revisoesProgramadas) console.log(`     Revisões: ${d.revisoesProgramadas}`);
-      if (d.eventosDoModulo) console.log(`     Eventos: ${d.eventosDoModulo}`);
+      if (d.capacidade) {
+        const c = d.capacidade;
+        const icone = { 'viável': '🟢', sobrecarregado: '🟠', indeterminado: '⚪' }[c.veredito];
+        console.log(`     ${icone} ${c.veredito}: ${c.horasComprometidas}h comprometidas, ` +
+          `teto efetivo ${c.tetoEfetivo}h${c.excesso ? `, excesso de ${c.excesso}h` : ''}`);
+        for (const b of c.blocos) {
+          console.log(`        • ${b.horaInicio || '--:--'} ${b.compromisso}` +
+            `${b.duracao ? ` (${b.duracao}h)` : ' (duração não informada)'}${b.inegociavel ? ' 🔒' : ''}`);
+        }
+      }
     }
     if (!dias.length) console.log('(nenhum dia encontrado para esse filtro)');
     console.log('');
   },
 
+  async compromissos(args) {
+    const lista = await Compromissos.lerCompromissos({ incluirInativos: args.includes('--todos') });
+    console.log(`\n🗓️  Compromissos — ${lista.length}\n` + '─'.repeat(62));
+    for (const c of lista) {
+      const quando = c.recorrencia === 'Única'
+        ? N.soData(c.vigencia?.inicio)
+        : `${c.recorrencia} ${c.diasDaSemana.join('/') || '(sem dia da semana!)'}`;
+      console.log(`${c.ativo ? '✅' : '⏸️ '} ${String(c.compromisso).padEnd(28)} ${String(c.tipo || '').padEnd(14)} ` +
+        `${String(quando).padEnd(22)} ${c.horaInicio || '--:--'} ` +
+        `${typeof c.duracao === 'number' ? `${c.duracao}h` : '⚠️ sem duração'}${c.inegociavel ? ' 🔒' : ''}`);
+    }
+    const semDuracao = lista.filter((c) => typeof c.duracao !== 'number');
+    if (semDuracao.length) {
+      console.log(`\n⚠️  ${semDuracao.length} compromisso(s) sem "Duração (h)". Enquanto estiverem assim,`);
+      console.log('    o cálculo de capacidade desses dias sai como "indeterminado" em vez de');
+      console.log('    assumir zero e te dar um número otimista e errado.');
+    }
+    console.log('');
+  },
+
+  async revisoes(args) {
+    const aplicar = args.includes('--aplicar');
+    const r = await Revisoes.reconciliarRevisoes({
+      aplicar, de: valorDe(args, '--de'), ate: valorDe(args, '--ate'),
+    });
+
+    console.log(`\n🔁 Reconciliação de revisões ${aplicar ? '(APLICANDO)' : '(simulação)'}\n` + '─'.repeat(62));
+    console.log(`Tópicos lidos: ${r.topicosLidos} · dias avaliados: ${r.diasAvaliados}`);
+    console.log(`Fonte das datas: ${Object.entries(r.fontes).filter(([, n]) => n)
+      .map(([f, n]) => `${n} por ${f}`).join('; ') || '—'}`);
+    console.log(`Já corretos: ${r.inalterados} · a mudar: ${r.mudancas.length}\n`);
+
+    for (const m of r.mudancas) {
+      console.log(`${m.data} ${m.dia || ''}`);
+      console.log(`  − ${m.antes || '(vazio)'}`);
+      console.log(`  + ${m.depois}`);
+    }
+    if (!r.mudancas.length) console.log('(nada a mudar — o cronograma já reflete o Hub)');
+    if (!aplicar && r.mudancas.length) {
+      console.log('\nSimulação. Para gravar: node index.js revisoes --aplicar');
+    }
+    console.log('');
+  },
+
+  async auditoria(args) {
+    const lista = await Agentes.lerAuditoria({ pendentesApenas: !args.includes('--todas') });
+    console.log(`\n🔬 Auditoria de Agentes — ${lista.length}\n` + '─'.repeat(62));
+    for (const a of lista) {
+      console.log(`${a.classificacao || '—'} ${a.agente || '(sem agente)'} · ${a.status || '—'}`);
+      console.log(`   ${a.auditoria || '(sem título)'}`);
+      if (a.observacao) console.log(`   obs: ${a.observacao}`);
+      if (a.diretrizGerada) console.log(`   diretriz: ${a.diretrizGerada}`);
+    }
+    if (!lista.length) console.log('(nenhuma auditoria pendente)');
+    console.log('');
+  },
+
+  async otimizar(args) {
+    const aplicar = args.includes('--aplicar');
+    const r = await Agentes.otimizarAgentes({
+      aplicar, ...(args.includes('--llm') ? { usarLLM: true } : {}),
+    });
+
+    console.log(`\n🧠 Loop de autoaperfeiçoamento ${aplicar ? '(APLICANDO)' : '(simulação)'}\n` + '─'.repeat(62));
+    console.log(`Otimizador: ${r.otimizador} · auditorias pendentes: ${r.auditoriasPendentes}\n`);
+
+    for (const res of r.resultados) {
+      if (res.erro) { console.log(`❌ ${res.auditoria}\n   ${res.erro}`); continue; }
+      console.log(`▸ ${res.agente} — ${res.classificacao}`);
+      console.log(`  obs: ${res.observacao}`);
+      console.log(`  padrões: ${(res.padroes || []).join(', ')} (${res.motivo})`);
+      for (const d of res.diretrizes) console.log(`  + ${d}`);
+      if (aplicar) {
+        console.log(`  → injetadas ${res.injetadas}, duplicadas ${res.duplicadas}, versão v${res.versao}`);
+      }
+    }
+    if (!r.resultados.length) console.log('(nada pendente — nenhum output foi marcado como inadequado)');
+    if (!aplicar && r.resultados.some((x) => !x.erro)) {
+      console.log('\nSimulação. Para gravar nas skills: node index.js otimizar --aplicar');
+    }
+    console.log('');
+  },
+
   async agente(args) {
-    const [pedido, comando, ...resto] = args;
+    const [pedido, comando, ...resto] = args.filter((a) => !a.startsWith('--'));
     if (!pedido) {
       console.error('Uso: node index.js agente "<pedido>" "<comando>" ["<detalhes>"]');
-      console.error(`Comandos: ${COMANDOS.join(' · ')}`);
+      console.error(`Comandos: ${Agentes.COMANDOS.join(' · ')}`);
       process.exitCode = 1;
       return;
     }
-    const r = await gerenciarAgente({
-      pedido,
-      comando: comando || 'Outro',
-      detalhes: resto.join(' ') || undefined,
+    const r = await Agentes.gerenciarAgente({
+      pedido, comando: comando || 'Outro', detalhes: resto.join(' ') || undefined,
     });
     console.log(`\n✅ Pedido ${r.acao}: "${r.pedido}"\n   ${r.url}\n`);
   },
 
-  ids() {
-    console.log(JSON.stringify(IDS, null, 2));
-  },
+  ids() { console.log(JSON.stringify(IDS, null, 2)); },
 
   ajuda() {
     console.log(`
 Jarvis · automação do Notion
 
-  node index.js diagnostico              Verifica autenticação e alcance (comece por aqui)
-  node index.js cronograma [filtros]     Lê o Cronograma de Ataque
-      --hoje | --pendentes | --de <AAAA-MM-DD> | --ate <AAAA-MM-DD> | --semana "<nome>"
+  node index.js diagnostico                  Autenticação e alcance (comece por aqui)
+
+  node index.js cronograma [filtros]         Plano diário
+      --hoje · --pendentes · --capacidade · --de <AAAA-MM-DD> · --ate <...> · --semana "<nome>"
+      --capacidade cruza com Compromissos e calcula o tempo livre real
+
+  node index.js compromissos [--todos]       Blocos fixos de tempo
+
+  node index.js revisoes [--aplicar]         Reconcilia as revisões com o Hub
+      Sem --aplicar é simulação: mostra o diff sem gravar
+
+  node index.js auditoria [--todas]          Auditorias de output dos agentes
+
+  node index.js otimizar [--aplicar] [--llm] Converte auditorias em diretrizes e
+      injeta nas páginas das skills. Sem --aplicar é simulação
+
   node index.js agente "<pedido>" "<comando>" ["<detalhes>"]
-                                         Cria ou atualiza um pedido na Central de Comandos
-  node index.js ids                      Imprime o mapa de IDs
-  node index.js ajuda                    Esta mensagem
+                                             Cria ou atualiza pedido na Central de Comandos
+
+  node index.js ids                          Mapa de IDs
+  node index.js ajuda                        Esta mensagem
+
+Variáveis: NOTION_TOKEN · JANELA_UTIL_H (${N.JANELA_UTIL_H}) · TETO_ESTUDO_DIA_H (${N.TETO_ESTUDO_DIA_H})
+           ANTHROPIC_API_KEY (opcional, habilita o otimizador por LLM)
 
 Antes de alterar o código, leia jarvis_architecture_log.md.
 `);
@@ -511,8 +297,33 @@ async function main() {
 if (require.main === module) main();
 
 module.exports = {
-  IDS, COMANDOS, STATUS_PEDIDO,
-  http, notion,
-  lerCronograma, gerenciarAgente, buscarPedido, diagnostico,
-  lerPropriedade, lerPropriedades, consultarBanco,
+  // mapa e transporte
+  IDS, http, notion, diagnostico,
+  COMANDOS: Agentes.COMANDOS, STATUS_PEDIDO: Agentes.STATUS_PEDIDO,
+  CLASSIFICACAO: Agentes.CLASSIFICACAO, STATUS_AUDITORIA: Agentes.STATUS_AUDITORIA,
+  // leitura
+  lerCronograma: Cronograma.lerCronograma,
+  lerCompromissos: Compromissos.lerCompromissos,
+  lerTopicosHub: Revisoes.lerTopicosHub,
+  lerAuditoria: Agentes.lerAuditoria,
+  // escrita
+  gerenciarAgente: Agentes.gerenciarAgente,
+  buscarPedido: Agentes.buscarPedido,
+  reconciliarRevisoes: Revisoes.reconciliarRevisoes,
+  otimizarAgentes: Agentes.otimizarAgentes,
+  injetarDiretrizes: Agentes.injetarDiretrizes,
+  // puro / testável
+  lerPropriedade: N.lerPropriedade, lerPropriedades: N.lerPropriedades,
+  consultarBanco: N.consultarBanco, dataDeFormula: N.dataDeFormula,
+  somarDias: N.somarDias, diffDias: N.diffDias, diaSemana: N.diaSemana,
+  ocorreEm: Compromissos.ocorreEm,
+  horasComprometidasEm: Compromissos.horasComprometidasEm,
+  avaliarCapacidade: Compromissos.avaliarCapacidade,
+  derivarRevisoesDoTopico: Revisoes.derivarRevisoesDoTopico,
+  indexarPorData: Revisoes.indexarPorData,
+  textoDerivado: Revisoes.textoDerivado,
+  sintetizarDiretriz: Agentes.sintetizarDiretriz,
+  TAXONOMIA: Agentes.TAXONOMIA,
+  // submódulos
+  N, Compromissos, Cronograma, Revisoes, Agentes,
 };
