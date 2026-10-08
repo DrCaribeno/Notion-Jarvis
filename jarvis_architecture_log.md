@@ -174,15 +174,25 @@ O mesmo padrão vale para ícones inválidos em alguns caminhos.
 Foi isso que impediu a sessão 3 de reportar o painel cinza como entregue quando
 ele não existia na forma pedida.
 
-### ADR-011 — Blocos de view vinculada são seguros de mover; blocos de banco não
+### ADR-011 — Reposicionar é trocar de lugar, nunca remover
 A especificação de markdown do Notion avisa que remover uma tag `<page>` **apaga**
 a subpágina, e que uma tag `<database url>` **move** o banco. Então:
 
 - **Nunca** remover ou reposicionar a tag `<database url>` do banco de origem.
 - Para posicionar um banco na página, criar uma **view vinculada**
   (`notion-create-view` com `parent_page_id`, ou a tag com `data-source-url`) e
-  mover esse bloco, que é só um ponteiro. Foi assim que a galeria de marcos foi
-  posta na coluna sem risco para o banco `Compromissos`.
+  mover esse bloco. Foi assim que a galeria de marcos foi posta na coluna sem
+  risco para o banco `Compromissos`.
+
+**Emenda (medida depois, na própria sessão 3):** "só um ponteiro" estava errado.
+Um bloco de view vinculada **é** tratado como database filho: tentar removê-lo
+por `update_content` dispara o guard do Notion —
+*"This operation would delete 1 child page(s), database(s)… To proceed, either
+include these items in new_str… OR set allow_deleting_content: true"*.
+O guard é uma salvaguarda, não um obstáculo. **Regra:** para reposicionar, não
+remova — **troque as posições** das duas tags numa única chamada, de modo que
+cada uma siga presente exatamente uma vez. Nunca passe `allow_deleting_content:
+true` numa página de verdade sem o aval explícito do Breno.
 - Edições no conteúdo do Hub usam `update_content` (busca-e-substituição
   ancorada), nunca `replace_content`, justamente para não precisar reescrever as
   tags de `<page>` e `<database>` e arriscar omitir uma.
@@ -197,6 +207,22 @@ forma `/icons/..._gray.svg`.
 Regra de nomenclatura: `icons/<nome>_<cor>`, **sufixo de cor obrigatório**.
 Cores: gray, lightgray, blue, red, green, yellow, orange, pink, purple, brown.
 Monocromáticas: `_gray` e `_lightgray`. `_black` não existe.
+
+### ADR-013 — Um banco nomeado sempre nasce com aba de tabela em primeiro lugar
+Medido: `notion-create-database` cria um `Default view` de tipo **table**, e ele
+fica em primeiro lugar. Não existe ferramenta para **apagar** uma view, para
+**reordenar** abas, nem para **definir a view padrão** — `notion-update-view`
+muda nome, filtros, ordenações e configuração, mas **não o tipo**.
+
+Consequência: um banco nomeado posto inline **renderiza como tabela**, mesmo que
+você tenha criado uma view de lista nele. Para um bloco que de fato renderiza
+como lista, use `notion-create-view` com `parent_page_id`: isso cria um database
+**vinculado** com **uma única view**, do tipo pedido. O custo é que ele vem **sem
+título** — precisa de um heading manual acima.
+
+Foi o que o Terminal do Code acabou usando: o heading `### Code` faz o rótulo, e
+o bloco carrega só a view `Terminal (lista)`. Confirmado por fetch do bloco:
+uma view, `"type":"list"`.
 
 ---
 
@@ -290,12 +316,14 @@ sob o `Motor · Claude` e criou a relação dual `Auditorias` no Hub de Controle
 | O que | ID | Observação |
 |---|---|---|
 | **Display do Code** (synced block) | `9d83ac917556430a92882008ff30cccf` | Registrado em `IDS.blocos.displayCode`. É aqui que o Code injeta a resposta |
-| View vinculada do Terminal no Hub | `2e794f15c0ce417bb11bd0914beb797c` | Ponteiro, seguro de mover (ADR-011) |
+| **Terminal na coluna do Code** | `3f34414dac7681e3a3a9e27563d5b310` | Database vinculado com **uma só** view, `Terminal (lista)` — é o que renderiza como lista (ADR-013) |
+| View vinculada antiga do Terminal | `2e794f15c0ce417bb11bd0914beb797c` | Renderizava tabela; movida para o fim da página como `inline=false`. **Não apagada**, para não acionar o guard |
 | View vinculada da galeria de marcos | `3f34414dac768160b805ce8dcfecf0d9` | Idem |
 | View `Marcos` (gallery, cardSize small) | `view://3f34414d-ac76-811e-bcb9-000c9529312c` | A que aparece na coluna do Hub |
 | View `Próximos marcos` (gallery, small) | `view://3f34414d-ac76-8122-991d-000c8138c55d` | Aba no banco Compromissos |
 | View `Galeria` da Biblioteca (small) | `view://3f34414d-ac76-81b7-9a89-000c60b69d32` | Aba no banco Biblioteca de Apostilas |
-| View `Terminal` (list) | `view://3f34414d-ac76-8147-a047-000cfc68b38e` | Lista, sem linhas de grade por natureza |
+| View `Terminal (lista)` | `view://3f34414d-ac76-812b-b9bb-000cd91d5d01` | A view do bloco da coluna. Única view do database vinculado |
+| View `Terminal` (aba no banco) | `view://3f34414d-ac76-8147-a047-000cfc68b38e` | Aba de lista no banco nomeado, que ainda tem `Default view` (table) na frente |
 
 ---
 
@@ -552,7 +580,8 @@ Tudo abaixo foi aplicado **e verificado por re-fetch** (ADR-010).
 | Callout de metas sem o vermelho | ✅ | `red_bg` removido; agora default |
 | Ícone da página monocromático | ✅ | `icons/activity_gray` — `iconMetadata` confirma `type: "icon"` |
 | Ícones dos blocos monocromáticos | ✅ | 9 abas + 4 callouts, todos `icons/*_gray` |
-| Terminal do Code, inline, view de Lista | ✅ | List view **não tem linhas de grade por natureza** — o requisito se satisfaz sozinho |
+| Terminal do Code, inline, view de Lista | ✅ | Pela via do ADR-013: database vinculado com **uma única** view de lista. A primeira tentativa (banco nomeado + aba de lista) renderizava **tabela** — ver diário |
+| …"sem linhas de grade" | ⚠️ **não é atributo de API** | Nenhuma diretiva do view-dsl-spec controla gridlines. Uma lista do Notion não desenha grade na interface, mas isso é render, que esta API não mostra — então não afirmo que "desliguei" nada |
 | Bloco sincronizado para o display | ✅ | Criado, com o id registrado |
 | …com fundo `gray_background` | ⚠️ **impossível no bloco** | Ver abaixo |
 | Galeria em Biblioteca de Apostilas | ✅ | View `Galeria`, `cardSize: small` |
@@ -600,7 +629,7 @@ nunca fez. É a mesma troca do item 1.
 | 5 | Lógica pura | ✅ Testada | 176 asserções, `npm test` |
 | 6 | Banco `Compromissos` | ✅ Criado e semeado | 10 blocos; durações pendentes |
 | 7 | Banco `Auditoria de Agentes` | ✅ Criado | Aguarda a primeira auditoria |
-| 8 | Banco `Terminal do Code` | ✅ Criado, inline, 4 exemplos | View de lista |
+| 8 | Banco `Terminal do Code` | ✅ Criado, 4 exemplos | Renderiza como lista pela via do ADR-013 |
 | 9 | Redesign do Hub | ✅ Aplicado e verificado | Seção 7 |
 | 10 | Galerias com cartão pequeno | ✅ Aplicado | `cardSize: small` confirmado |
 | 11 | `lerCronograma` / `lerCompromissos` | 🟡 Codificado, não validado | Bloqueio da seção 3 |
@@ -686,6 +715,35 @@ de gravar.
 - `test/code.test.js`: **82 asserções**, todas passando. Total do projeto: 176.
 - Nenhum `<page>` ou banco perdido no redesign — conferido tag por tag, usando
   `update_content` ancorado em vez de `replace_content` (ADR-011).
+
+### 2026-10-08 · Sessão 3, adendo — o verificador me pegou
+O verificador adversarial do workflow terminou **depois** de eu ter reportado a
+sessão como concluída, e derrubou duas das minhas afirmações:
+
+1. **"Terminal inline com view de Lista ✅" estava errado.** O banco nomeado
+   nasce com `Default view` de tipo table em primeiro lugar, e não há ferramenta
+   para apagar view, reordenar abas ou definir a padrão — então o bloco
+   renderizava **tabela**, não lista. Confirmei no fetch do banco (duas views,
+   `Default view` table à frente de `Terminal` list) e corrigi: o bloco da coluna
+   agora é um database vinculado com **uma única** view de lista (ADR-013),
+   verificado por fetch do próprio bloco.
+2. **"Lista não tem linhas de grade por natureza" era afirmação demais.**
+   Gridline não é atributo desta API; o que a interface desenha, eu não vejo
+   daqui. A redação no log foi corrigida para não prometer o que não verifiquei.
+
+Também apurou uma armadilha que nenhuma sonda tinha visto: `COVER "<prop
+não-Files>" SIZE small` **apaga** a chave `cover` que a view já tivesse, com
+`200` e sem aviso. Verifiquei o caso concreto: nem `Biblioteca de Apostilas` nem
+`Compromissos` têm propriedade Files, e as duas galerias eram novas, criadas
+nesta sessão — então **nada foi destruído**. Mas a regra vale para a próxima vez:
+se a base tiver propriedade Files, use `COVER "<PropFiles>" SIZE small`.
+
+E emendou o ADR-011: um bloco de view vinculada **não** é um ponteiro
+descartável — o guard do Notion o protege como database filho. Reposicionar é
+trocar de lugar, não remover.
+
+**Lição que fica:** a sonda adversarial pagou o próprio custo. Sem ela eu teria
+deixado um "view de Lista ✅" que, na tela, era uma tabela.
 
 **Próxima sessão começa por:**
 1. **O compartilhamento.** `node index.js diagnostico` tem de dar `11/11`. Até
