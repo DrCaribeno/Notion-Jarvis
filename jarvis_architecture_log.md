@@ -12,7 +12,7 @@
 - **Runtime:** Node.js v22.22.0 · npm 10.9.4 (sessão em nuvem, container efêmero)
 - **Workspace Notion:** `Breno's Notion` (`12dd846f-533a-450e-8778-504592474043`)
 - **Integração (bot):** `ClaudeCode` (`3f34414d-ac76-81ff-957c-002778ff3e0b`), tipo *workspace bot*
-- **Última atualização:** 2026-10-08 (sessão 3)
+- **Última atualização:** 2026-10-08 (sessão 4)
 
 ### Estrutura do código
 ```
@@ -24,9 +24,9 @@ src/revisoes.js       reconciliação das revisões com o Hub          (item 1)
 src/agentes.js        fila de pedidos e loop de autoaperfeiçoamento (item 3)
 src/code.js           assistente Code: fila, comandos e display no Hub
 test/logica.test.js   94 asserções sobre datas, capacidade, revisões, taxonomia
-test/code.test.js     82 asserções sobre a gramática e os handlers do Code
+test/code.test.js     133 asserções sobre conversa, handlers, cortesia e voz
 ```
-`npm test` roda as duas suítes: **176 asserções**.
+`npm test` roda as duas suítes: **227 asserções**.
 
 ---
 
@@ -207,6 +207,25 @@ forma `/icons/..._gray.svg`.
 Regra de nomenclatura: `icons/<nome>_<cor>`, **sufixo de cor obrigatório**.
 Cores: gray, lightgray, blue, red, green, yellow, orange, pink, purple, brown.
 Monocromáticas: `_gray` e `_lightgray`. `_black` não existe.
+
+### ADR-014 — A personalidade vive na moldura, nunca nos números
+O Jarvis Code tem voz: seca, educada, prestativa, com o bom senso de avisar
+quando a aritmética não fecha. Mas a voz é **estruturalmente separada do dado**.
+
+Os handlers produzem fatos e nada mais. Uma camada `voz` acrescenta **uma** linha
+no fim, em cinza, marcada `voz: true`. Nenhum número passa por ela, então
+nenhuma frase pode corromper uma hora, uma data ou um percentual — e quem quiser
+o retorno cru só descarta os blocos marcados.
+
+A escolha da fala é **determinística**: sai de uma característica do próprio fato
+(`escolher`), não de aleatoriedade. Varia com a situação, mas a mesma situação dá
+sempre a mesma frase. Sem isso não haveria como testar a voz, e uma voz não
+testável acabaria dizendo algo que contradiz o dado ao lado.
+
+Há também cortesia (`SOCIAL`): "oi", "obrigado", "quem é você" recebem resposta,
+não "não entendi". Responder erro a um cumprimento parece defeito e esfria uma
+interface de conversa. E o "não entendi" assume o limite como próprio — se não
+compreendi, o vocabulário estreito é meu, não culpa de quem escreveu.
 
 ### ADR-013 — Um banco nomeado sempre nasce com aba de tabela em primeiro lugar
 Medido: `notion-create-database` cria um `Default view` de tipo **table**, e ele
@@ -535,11 +554,27 @@ tenta de novo — em vez de um dia marcado "Gerando" sem pedido nenhum.
 Com isso a **Central de Comandos é a única fila de trabalho**, que era o ponto
 do defeito 3.
 
-### O assistente Code
+### O assistente Jarvis Code
 
-Uma gramática de comandos determinística, não linguagem natural — porque não há
-credencial de LLM (ADR-008). Comandos funcionam hoje, são testáveis sem rede e
-não alucinam dados do Hub.
+**Nome:** "Code" virou **Jarvis Code** na sessão 4, para não competir com o nome
+do próprio sistema. O comando do CLI é `jarvis`; `code` segue aceito como apelido.
+
+**Conversa, não comandos.** A sessão 4 corrigiu uma premissa errada da sessão 3:
+eu havia desenhado uma gramática de barras, mas o Breno não vai programar ali —
+a conversa é casual. Então `interpretar()` passou a ter dois caminhos: casa um
+comando explícito quando ele aparece, e senão **classifica a frase por intenção**
+(`INTENCOES`, 8 famílias de sinônimos). "o que eu faço hoje?", "tenho tempo
+quinta?", "tô travado em quê?" e "e amanhã?" chegam ao handler certo.
+
+Isso é classificação de intenção, não compreensão de linguagem — não há
+credencial de LLM (ADR-008). A vantagem é que funciona hoje, é testável sem rede
+e **nunca inventa um dado do Hub**: se não entender, diz que não entendeu.
+
+Dois extratores varrem a frase inteira, porque em conversa não há posição fixa:
+`extrairIdTopico` acha `F04` em "como tá o f4?" e normaliza; `extrairDataDoTexto`
+entende ISO, `dd/mm`, "dia 26", hoje/amanhã/ontem/depois de amanhã e dia da
+semana escrito ("quinta" → a próxima quinta, hoje incluído). Último recurso: uma
+frase que cita um dia e nada mais cai no plano daquele dia.
 
 | Comando | Responde |
 |---|---|
@@ -744,6 +779,33 @@ trocar de lugar, não remover.
 
 **Lição que fica:** a sonda adversarial pagou o próprio custo. Sem ela eu teria
 deixado um "view de Lista ✅" que, na tela, era uma tabela.
+
+### 2026-10-08 · Sessão 4 — Jarvis Code, conversa e voz
+Três pedidos do Breno, e o primeiro derrubou uma premissa minha.
+
+- **"Lá não irei programar, a conversa será casual."** A gramática de barras que
+  eu desenhei na sessão 3 estava errada para o uso real. Adicionada
+  classificação de intenção (`INTENCOES`) + extratores de ID e data que varrem a
+  frase inteira. Dois bugs encontrados pelos próprios testes novos: "depois de
+  amanhã" casava `amanha` primeiro (ordem das checagens), e `/\b(desculp…)\b/`
+  não casava "desculpa" — o `\b` final cai entre duas letras. O mesmo erro de
+  `\b` já havia me pegado com `obrigad`; agora está comentado no código.
+- **"Chamar de Jarvis Code."** Renomeado: módulo, CLI (`jarvis`, com `code` como
+  apelido), banco no Notion e a caixa no Hub.
+- **"Personalidade do Jarvis, senso de humor e auxílio."** → ADR-014. A voz é uma
+  camada separada: uma linha cinza no fim, marcada `voz: true`, determinística.
+  Os handlers passaram a declarar `fatos`, e `comentar()` escolhe a fala a partir
+  deles. Mais cortesia (`SOCIAL`), para "oi" e "obrigado" não virarem erro.
+- **Topo do Hub reorganizado**, conforme pedido: o Jarvis Code virou uma **caixa
+  cinza recolhida de uma linha** (`<details color="gray_bg">`) no topo, com o
+  terminal e o display dentro. O bloco de 3 colunas com margens vazias saiu — ele
+  existia para emoldurar o Code grande, e com a caixa recolhida perdeu a função.
+  No lugar: metas + uma linha de atalhos para Hub Central de Controle, Cronograma,
+  Compromissos e Central de Comandos (menções, sem duplicar banco). Resultado:
+  `## Hoje` subiu de ~20 linhas para a terceira posição da página.
+- Verificado por re-fetch que o synced block `9d83ac91…` **sobreviveu à mudança**
+  com o mesmo id — era o risco real, porque `IDS.blocos.displayCode` o referencia.
+- **227 asserções** passando (94 + 133).
 
 **Próxima sessão começa por:**
 1. **O compartilhamento.** `node index.js diagnostico` tem de dar `11/11`. Até

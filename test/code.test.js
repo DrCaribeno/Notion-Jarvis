@@ -92,6 +92,9 @@ const FONTES = {
 };
 
 const textos = (resposta) => (resposta.blocos || []).map((b) => b.texto).join(' | ');
+/** Só os blocos de DADO — descarta a linha da voz. */
+const dados = (resposta) => (resposta.blocos || []).filter((b) => !b.voz);
+const vozDe = (resposta) => (resposta.blocos || []).filter((b) => b.voz);
 
 // ── A. Gramática ──────────────────────────────────────────────────
 grupo('A. Code · interpretar');
@@ -126,8 +129,9 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
   grupo('C. Code · handlers');
 
   const ajuda = await Code.HANDLERS.ajuda([], FONTES);
-  eq(ajuda.blocos.length, Object.keys(Code.COMANDOS_CODE).length, 'ajuda lista todos os comandos');
+  eq(dados(ajuda).length, Object.keys(Code.COMANDOS_CODE).length, 'ajuda lista todos os comandos');
   ok(textos(ajuda).includes('/status <ID>'), 'ajuda mostra a forma de uso');
+  eq(vozDe(ajuda).length, 1, 'ajuda traz exatamente uma linha de voz');
 
   const hoje = await Code.HANDLERS.hoje(['2026-10-12'], FONTES);
   ok(hoje.titulo.includes('2026-10-12'), 'hoje no título', hoje.titulo);
@@ -194,7 +198,8 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
 
   const desconhecido = await Code.executar('me explica a vida', FONTES);
   eq(desconhecido.comando, null, 'desconhecido não tem comando');
-  ok(textos(desconhecido).includes('Não entendi'), 'desconhecido avisa');
+  ok(textos(desconhecido).includes('faz um café') || textos(desconhecido).includes('sentido útil'),
+    'desconhecido eco o que recebeu e assume o limite como próprio');
   ok(textos(desconhecido).includes('/hoje'), 'desconhecido lista os comandos — nunca falha em silêncio');
 
   const quebrado = await Code.executar('/fracos', {
@@ -248,6 +253,82 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
     'dias diferentes geram títulos diferentes');
   eq(Code.PEDIR, '📥 Pedir', 'estado de entrada bate com o schema do Cronograma');
   eq(Code.GERANDO, '⏳ Gerando', 'estado de saída bate com o schema do Cronograma');
+
+
+  // ── G. Conversa casual ──────────────────────────────────────────
+  grupo('G. Code · conversa casual (sem barra)');
+  const conv = (t) => Code.interpretar(t);
+  eq(conv('o que eu faço hoje?').comando, 'hoje', 'pergunta sobre o dia');
+  eq(conv('o que eu faço hoje?').via, 'conversa', 'e vem pelo caminho de conversa');
+  eq(conv('/hoje').via, 'comando', 'a barra ainda usa o caminho de comando');
+  eq(conv('tenho tempo quinta?').comando, 'capacidade', 'pergunta sobre tempo');
+  eq(conv('da tempo de estudar?').comando, 'capacidade', 'variação sobre tempo');
+  eq(conv('o que ta atrasado?').comando, 'pendentes', 'pergunta sobre atraso');
+  eq(conv('to travado em que?').comando, 'fracos', 'pergunta sobre dificuldade');
+  eq(conv('preciso rever o que?').comando, 'revisoes', 'pergunta sobre revisão');
+  eq(conv('que prova vem?').comando, 'agenda', 'pergunta sobre compromisso');
+  eq(conv('como ta o F04?').comando, 'status', 'pergunta sobre tópico');
+  eq(conv('me ajuda').comando, 'ajuda', 'pedido de ajuda');
+  eq(conv('e amanha?').comando, 'hoje', 'frase só com data cai no plano do dia');
+  eq(conv('faz um cafe pra mim').reconhecido, false, 'pedido fora de escopo não é reconhecido');
+  eq(conv('me explica a vida').reconhecido, false, 'conversa fora de escopo também não');
+
+  grupo('H. Code · extração de ID e data da frase inteira');
+  eq(Code.extrairIdTopico('como ta o F04?'), 'F04', 'ID no meio da frase');
+  eq(Code.extrairIdTopico('e o f4, ja vi?'), 'F04', 'ID em minúscula e sem zero → normalizado');
+  eq(Code.extrairIdTopico('status K9'), 'K09', 'outro prefixo, um dígito');
+  eq(Code.extrairIdTopico('nada aqui'), null, 'sem ID devolve null');
+  eq(Code.extrairIdTopico('tenho 42 questoes'), null, 'número solto não é ID');
+  eq(Code.extrairDataDoTexto('e amanha?', '2026-10-08'), '2026-10-09', 'amanhã');
+  eq(Code.extrairDataDoTexto('ontem eu parei', '2026-10-08'), '2026-10-07', 'ontem');
+  eq(Code.extrairDataDoTexto('depois de amanha', '2026-10-08'), '2026-10-10', 'depois de amanhã');
+  eq(Code.extrairDataDoTexto('o que rola dia 26?', '2026-10-08'), '2026-10-26', '"dia N" usa o mês corrente');
+  eq(Code.extrairDataDoTexto('tenho tempo 26/10?', '2026-10-08'), '2026-10-26', 'dd/mm');
+  eq(Code.extrairDataDoTexto('e em 2026-11-09?', '2026-10-08'), '2026-11-09', 'ISO embutida');
+  // 2026-10-08 é quinta (ancorado nos rótulos do Cronograma).
+  eq(Code.extrairDataDoTexto('tenho tempo na segunda?', '2026-10-08'), '2026-10-12', 'segunda → a próxima');
+  eq(Code.extrairDataDoTexto('e quinta?', '2026-10-08'), '2026-10-08', 'quinta sendo hoje → hoje');
+  eq(Code.extrairDataDoTexto('e sexta?', '2026-10-08'), '2026-10-09', 'sexta → amanhã');
+  eq(Code.extrairDataDoTexto('nada de data aqui'), null, 'sem data devolve null');
+
+  grupo('I. Code · cortesia');
+  const social = async (t) => Code.executar(t, FONTES);
+  ok((await social('oi')).comando === 'social', 'cumprimento é tratado como social');
+  ok(textos(await social('oi')).includes('Pois não'), 'e recebe resposta, não erro');
+  ok(textos(await social('obrigado jarvis')).includes('dispor'), 'agradecimento com palavra depois');
+  ok(textos(await social('obrigada')).includes('dispor'), 'flexão de gênero');
+  ok(textos(await social('quem é você?')).includes('Jarvis Code'), 'identidade, com acento');
+  ok(textos(await social('qual seu nome?')).includes('Jarvis Code'), 'identidade por outra via');
+  ok(textos(await social('tchau')).includes('Até'), 'despedida');
+  ok(textos(await social('desculpa')).includes('ressentimentos'), 'desculpa');
+  ok((await social('faz um café pra mim')).comando === null, 'fora de escopo NÃO é social');
+
+  grupo('J. Code · a voz não contamina o dado');
+  const comVoz = await Code.executar('/pendentes', FONTES);
+  eq(vozDe(comVoz).length, 1, 'resposta traz exatamente uma linha de voz');
+  eq(vozDe(comVoz)[0].cor, 'gray', 'a voz é sempre cinza');
+  ok(vozDe(comVoz)[0].voz === true, 'e sempre marcada, para poder ser descartada');
+  ok(comVoz.blocos[comVoz.blocos.length - 1].voz === true, 'a voz é sempre o ÚLTIMO bloco');
+  ok(dados(comVoz).every((b) => !b.voz), 'os blocos de dado não têm marca de voz');
+  ok(dados(comVoz).some((b) => b.texto.includes('2026-10-01')), 'o dado continua intacto sob a voz');
+
+  // Determinismo: a mesma situação tem de dar a mesma frase, senão não há teste.
+  const v1 = await Code.executar('/pendentes', FONTES);
+  const v2 = await Code.executar('/pendentes', FONTES);
+  eq(vozDe(v1)[0].texto, vozDe(v2)[0].texto, 'a voz é determinística para o mesmo fato');
+
+  // A voz muda com o fato, não por capricho.
+  const semAtraso = await Code.executar('/pendentes', {
+    ...FONTES, lerCronograma: async () => [],
+  });
+  ok(vozDe(semAtraso)[0].texto !== vozDe(v1)[0].texto, 'fato diferente → fala diferente');
+  ok(vozDe(semAtraso)[0].texto.includes('Nada atrasado'), 'e a fala corresponde ao fato');
+
+  grupo('K. Code · a voz nunca derruba a resposta');
+  eq(Code.comentar ? 'exportado' : 'interno', 'interno', 'comentar é detalhe interno');
+  const vozQuebrada = await Code.executar('/fracos', FONTES);
+  ok(Array.isArray(vozQuebrada.blocos), 'resposta segue válida');
+  ok(vozDe(vozQuebrada).length <= 1, 'no máximo uma linha de voz');
 
   // ── Resultado ───────────────────────────────────────────────────
   console.log('\n' + '─'.repeat(62));

@@ -11,7 +11,7 @@
  *   src/cronograma.js   leitura do plano diário
  *   src/revisoes.js     reconciliação das revisões com o Hub
  *   src/agentes.js      fila de pedidos e loop de autoaperfeiçoamento
- *   src/code.js         assistente Code: fila, comandos e display no Hub
+ *   src/code.js         Jarvis Code: conversa, fila e display no Hub
  */
 
 'use strict';
@@ -265,20 +265,23 @@ const COMANDOS_CLI = {
     console.log('');
   },
 
-  async code(args) {
+  async jarvis(args) {
     const aplicar = args.includes('--aplicar');
     const texto = args.filter((a) => !a.startsWith('--')).join(' ');
     if (!texto) {
-      console.error('Uso: node index.js code "<comando>" [--aplicar]');
-      console.error(`Comandos: ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}`);
+      console.error('Uso: node index.js jarvis "<pergunta>" [--aplicar]');
+      console.error('Escreva solto, sem barra. Ex: node index.js jarvis "o que eu faço hoje?"');
+      console.error(`Comandos explícitos: ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}`);
       process.exitCode = 1;
       return;
     }
 
     const resposta = await Code.executar(texto);
     console.log(`\n❯ ${texto}\n` + '─'.repeat(62));
-    console.log(`${resposta.titulo}\n`);
+    console.log(`${resposta.titulo}` +
+      (resposta.via ? `   [${resposta.via}${resposta.comando ? ` → ${resposta.comando}` : ''}]` : '') + '\n');
     for (const b of resposta.blocos || []) {
+      if (b.voz) { console.log(`\n  ↳ ${b.texto}`); continue; }
       console.log(`${b.t === 'b' ? '  • ' : b.t === 'h' ? '\n' : '  '}${b.texto}`);
     }
     if (aplicar) {
@@ -313,6 +316,9 @@ const COMANDOS_CLI = {
     console.log('');
   },
 
+  // `code` segue aceito como apelido do comando antigo.
+  async code(args) { return COMANDOS_CLI.jarvis(args); },
+
   ids() { console.log(JSON.stringify(IDS, null, 2)); },
 
   ajuda() {
@@ -338,13 +344,16 @@ Jarvis · automação do Notion
   node index.js agente "<pedido>" "<comando>" ["<detalhes>"]
                                              Cria ou atualiza pedido na Central de Comandos
 
-  — Assistente Code —
+  — Jarvis Code —
 
   node index.js promover [--aplicar]         Promove "📥 Pedir" do Cronograma a
       pedido formal na Central de Comandos, que passa a ser a única fila
 
-  node index.js code "<comando>" [--aplicar] Executa um comando do Code.
-      Com --aplicar, injeta a resposta no display do Hub
+  node index.js jarvis "<pergunta>" [--aplicar]
+                                             Conversa com o Jarvis Code. Escreva solto,
+      sem barra: "o que eu faço hoje?", "tenho tempo quinta?", "como tá o F04?".
+      Com --aplicar, injeta a resposta no display do Hub.
+      Comandos explícitos também funcionam:
       ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}
 
   node index.js fila [--aplicar]             Atende os comandos de texto da fila
