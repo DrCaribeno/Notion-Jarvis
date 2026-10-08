@@ -1,0 +1,25 @@
+{
+  "name": "notion-jarvis",
+  "version": "0.1.0",
+  "description": "Jarvis - ecossistema de automacao do Notion (Hub Central MED 1.5)",
+  "main": "index.js",
+  "scripts": {
+    "diagnostico": "node index.js diagnostico",
+    "cronograma": "node index.js cronograma",
+    "ajuda": "node index.js ajuda"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DrCaribeno/Notion-Jarvis.git"
+  },
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/DrCaribeno/Notion-Jarvis/issues"
+  },
+  "homepage": "https://github.com/DrCaribeno/Notion-Jarvis#readme",
+  "dependencies": {
+    "@notionhq/client": "^5.27.0",
+    "axios": "^1.20.0"
+  },
+  "private": true
+}
