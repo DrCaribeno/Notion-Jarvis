@@ -12,7 +12,7 @@
 - **Runtime:** Node.js v22.22.0 · npm 10.9.4 (sessão em nuvem, container efêmero)
 - **Workspace Notion:** `Breno's Notion` (`12dd846f-533a-450e-8778-504592474043`)
 - **Integração (bot):** `ClaudeCode` (`3f34414d-ac76-81ff-957c-002778ff3e0b`), tipo *workspace bot*
-- **Última atualização:** 2026-10-08 (sessão 2)
+- **Última atualização:** 2026-10-08 (sessão 3)
 
 ### Estrutura do código
 ```
@@ -22,8 +22,11 @@ src/compromissos.js   blocos de tempo e capacidade real do dia      (item 2)
 src/cronograma.js     leitura do plano diário
 src/revisoes.js       reconciliação das revisões com o Hub          (item 1)
 src/agentes.js        fila de pedidos e loop de autoaperfeiçoamento (item 3)
-test/logica.test.js   94 asserções sobre a lógica pura (`npm test`)
+src/code.js           assistente Code: fila, comandos e display no Hub
+test/logica.test.js   94 asserções sobre datas, capacidade, revisões, taxonomia
+test/code.test.js     82 asserções sobre a gramática e os handlers do Code
 ```
+`npm test` roda as duas suítes: **176 asserções**.
 
 ---
 
@@ -146,11 +149,67 @@ o caminho determinístico é o padrão e é o único coberto por testes. O camin
 por LLM está escrito mas **não exercitado** — se ele falhar em tempo de
 execução, o loop cai no determinístico e registra o motivo, em vez de travar.
 
+### ADR-009 — Duas camadas de acesso: API da integração e conector MCP
+O Jarvis tem **dois** caminhos para o Notion, e eles têm alcances diferentes:
+
+| Camada | Autentica como | Alcance | Usada para |
+|---|---|---|---|
+| API REST (`src/notion.js`) | integração `ClaudeCode` | só o que for compartilhado — **hoje, nada** | todo o código executável |
+| Conector MCP | Breno | workspace inteiro | estrutura, schemas, views, redesign |
+
+Isso não é redundância: é a razão pela qual a sessão 3 pôde entregar o redesign do
+Hub e os bancos novos enquanto o código seguia bloqueado. O que é estrutura
+(criar banco, criar view, editar blocos) foi feito pelo MCP; o que é execução
+recorrente (ler, reconciliar, injetar) está no código, esperando o
+compartilhamento. **Regra:** nunca presumir que uma leitura feita por MCP estará
+disponível ao código — e vice-versa.
+
+### ADR-010 — Sucesso de chamada não é prova de efeito
+Medido na sessão 3: `<synced_block color="gray_bg">` retorna `200`, **e a cor é
+silenciosamente descartada**. Nenhum erro, nenhum aviso; só um re-fetch revela.
+O mesmo padrão vale para ícones inválidos em alguns caminhos.
+
+**Regra que passa a valer para toda escrita estrutural:** depois de gravar,
+**re-ler e conferir o atributo**. Um `200` sozinho não entra no log como feito.
+Foi isso que impediu a sessão 3 de reportar o painel cinza como entregue quando
+ele não existia na forma pedida.
+
+### ADR-011 — Blocos de view vinculada são seguros de mover; blocos de banco não
+A especificação de markdown do Notion avisa que remover uma tag `<page>` **apaga**
+a subpágina, e que uma tag `<database url>` **move** o banco. Então:
+
+- **Nunca** remover ou reposicionar a tag `<database url>` do banco de origem.
+- Para posicionar um banco na página, criar uma **view vinculada**
+  (`notion-create-view` com `parent_page_id`, ou a tag com `data-source-url`) e
+  mover esse bloco, que é só um ponteiro. Foi assim que a galeria de marcos foi
+  posta na coluna sem risco para o banco `Compromissos`.
+- Edições no conteúdo do Hub usam `update_content` (busca-e-substituição
+  ancorada), nunca `replace_content`, justamente para não precisar reescrever as
+  tags de `<page>` e `<database>` e arriscar omitir uma.
+
+### ADR-012 — Assimetria de leitura e escrita nos ícones nativos
+Escreve-se `icons/document_gray`; um callout **relê** como
+`/icons/document_gray.svg` (barra inicial e extensão), enquanto o ícone de página
+relê como `icons/document_gray`. As duas formas são aceitas na entrada.
+Consequência prática: ao ancorar `old_str` sobre um callout já existente, usar a
+forma `/icons/..._gray.svg`.
+
+Regra de nomenclatura: `icons/<nome>_<cor>`, **sufixo de cor obrigatório**.
+Cores: gray, lightgray, blue, red, green, yellow, orange, pink, purple, brown.
+Monocromáticas: `_gray` e `_lightgray`. `_black` não existe.
+
 ---
 
 ## 3. Bloqueio ativo — compartilhamento na integração certa
 
-**Status em 2026-10-08, sessão 2: ainda bloqueado. `0/10` bancos alcançáveis.**
+**Status em 2026-10-08, sessão 3: AINDA BLOQUEADO. `0/11` bancos alcançáveis.**
+
+Na sessão 3 o acesso foi anunciado como resolvido ("a descoberta do ID resolve o
+impasse"). Não resolveu: saber o ID não concede permissão — alguém precisa abrir
+Conexões no Notion e adicionar a integração. Reconfirmado por três sondas:
+`POST /v1/search` → `200` com `results: []`; `GET /v1/blocks/<hub>/children` →
+`404`; `GET /v1/users` → `200` listando os 4 usuários (logo, a autenticação está
+íntegra e o que falta é só compartilhamento).
 
 As permissões foram concedidas, mas não chegaram à integração que o código usa.
 Há **três bots** neste workspace, e os IDs de dois deles são quase idênticos:
@@ -176,8 +235,8 @@ GET  /v1/pages/3f24…38b3  →  404 "Make sure the relevant pages and databases
 **Como liberar:** no Notion, abrir o **Hub Central MED 1.5** → `⋯` (canto
 superior direito) → **Conexões** → procurar **`ClaudeCode`** → Confirmar.
 O acesso é herdado pelas subpáginas, então **um compartilhamento no Hub
-destrava os 10 bancos e as 3 páginas de skill**. Em seguida,
-`node index.js diagnostico` deve mostrar `10/10`.
+destrava os 11 bancos e as 3 páginas de skill**. Em seguida,
+`node index.js diagnostico` deve mostrar `11/11`.
 
 Os IDs da seção 4 vieram do conector MCP (autenticado como você, vê tudo), e é
 também por ele que os bancos novos foram criados — por isso o mapeamento está
@@ -216,14 +275,27 @@ completo embora a API da integração ainda responda 404.
 | Repositório Clínico e Visual | `f038c9b39ac64baa8a2487598b4fbd63` | `72d53f7b-18bc-4fac-92d6-24d68cd10689` |
 | **Compromissos** ⭐ | `ebb4eacd50eb40249d20cc124a7078b6` | `1de67c6f-c1b3-49f3-a24a-2ed3fb8cc7f3` |
 | **Auditoria de Agentes** ⭐ | `163ee7f987324454a8578e8e0760fb2a` | `8e7588a0-bdc9-4cba-96c3-070aadc93476` |
+| **Terminal do Code** ⭐⭐ | `e13980fc76b447cf824c5eebe584335d` | `7cdb5b46-1af5-4535-b4d3-129592c60bd9` |
 
-⭐ criados em 2026-10-08 (sessão 2). `Compromissos` fica sob o Hub e criou a
+⭐⭐ criado na sessão 3, inline no topo do Hub. ⭐ criados na sessão 2. `Compromissos` fica sob o Hub e criou a
 relação dual `Compromissos` no Cronograma de Ataque. `Auditoria de Agentes` fica
 sob o `Motor · Claude` e criou a relação dual `Auditorias` no Hub de Controle.
 
 > Views inline (não consultar direto; usar sempre o banco acima): Plano de hoje
 > `3f24414dac76811b884feb9bd6bb791d` · Tópicos de hoje `3f24414dac76818e909cc6dc3a1c29cd`
 > · Domínio `3f24414dac7681999546e536e2bf7e74` · Pontos fracos `3f24414dac768178935fca64d7c53561`.
+
+### Blocos e views nomeados (sessão 3)
+
+| O que | ID | Observação |
+|---|---|---|
+| **Display do Code** (synced block) | `9d83ac917556430a92882008ff30cccf` | Registrado em `IDS.blocos.displayCode`. É aqui que o Code injeta a resposta |
+| View vinculada do Terminal no Hub | `2e794f15c0ce417bb11bd0914beb797c` | Ponteiro, seguro de mover (ADR-011) |
+| View vinculada da galeria de marcos | `3f34414dac768160b805ce8dcfecf0d9` | Idem |
+| View `Marcos` (gallery, cardSize small) | `view://3f34414d-ac76-811e-bcb9-000c9529312c` | A que aparece na coluna do Hub |
+| View `Próximos marcos` (gallery, small) | `view://3f34414d-ac76-8122-991d-000c8138c55d` | Aba no banco Compromissos |
+| View `Galeria` da Biblioteca (small) | `view://3f34414d-ac76-81b7-9a89-000c60b69d32` | Aba no banco Biblioteca de Apostilas |
+| View `Terminal` (list) | `view://3f34414d-ac76-8147-a047-000cfc68b38e` | Lista, sem linhas de grade por natureza |
 
 ---
 
@@ -419,36 +491,138 @@ observação vira a regra, literal — como *restrição dura* se a classificaç
 
 ---
 
-## 7. Status das integrações
+## 7. O assistente Code e o redesign do Hub (sessão 3)
 
-| # | Integração | Status | Nota |
-|---|---|---|---|
-| 1 | Autenticação na API do Notion | ✅ Operacional | `users/me` e `users` respondem 200 |
-| 2 | Transporte axios + shim do SDK | ✅ Operacional | ADR-001, verificado |
-| 3 | Mapeamento de IDs do hub | ✅ Completo | 9 páginas, 10 bancos |
-| 4 | `diagnostico()` | ✅ Operacional | 10 bancos + 3 páginas de skill |
-| 5 | Lógica pura (datas, capacidade, derivação, taxonomia) | ✅ Testada | 94 asserções, `npm test` |
-| 6 | Banco `Compromissos` | ✅ Criado e semeado | 10 blocos; durações pendentes |
-| 7 | Banco `Auditoria de Agentes` | ✅ Criado | Aguarda a primeira auditoria sua |
-| 8 | `lerCronograma()` / `lerCompromissos()` | 🟡 Codificado, não validado | Bloqueio da seção 3 |
-| 9 | `reconciliarRevisoes()` | 🟡 Codificado, não validado | Dry-run por padrão (ADR-006) |
-| 10 | `otimizarAgentes()` — determinístico | 🟡 Codificado, lógica testada | Injeção não validada; dry-run por padrão |
-| 11 | `otimizarAgentes()` — por LLM | ⬜ Escrito, não exercitado | Sem credencial nesta sessão (ADR-008) |
-| 12 | Promoção de `📥 Pedir` → Central de Comandos | ⬜ Não começou | Defeito 3 da sessão 1, ainda aberto |
-| 13 | Ponte Anki (`sincronizar_anki.bat`) | ⬜ Fora de escopo | Vive no Make |
+### Pendência 3 fechada — `📥 Pedir` vira pedido formal
 
-Legenda: ✅ operacional e verificado · 🟡 escrito, verificação bloqueada ·
-⬜ não começou
+`promoverPedidos()` em `src/code.js`. Todo dia do Cronograma marcado `📥 Pedir`
+passa a gerar um pedido na Central de Comandos (título determinístico
+`Apostila do dia · <data> (<dia>)`, que é a chave de idempotência) e o dia vai
+para `⏳ Gerando`, para não ser promovido duas vezes.
 
-**Leitura honesta do estado:** toda a lógica que pode ser testada sem a API
-está testada. Nenhum caminho de escrita foi exercitado contra o seu Notion,
-porque a integração `ClaudeCode` não vê nada ainda. É exatamente por isso que
-as duas escritas destrutivas são dry-run por padrão: a primeira execução real
-vai te mostrar o diff antes de tocar em qualquer coisa.
+A ordem das duas escritas é deliberada: **o pedido é criado antes de o dia mudar
+de estado**. Se falhar no meio, o dia continua `📥 Pedir` e a próxima execução
+tenta de novo — em vez de um dia marcado "Gerando" sem pedido nenhum.
+
+Com isso a **Central de Comandos é a única fila de trabalho**, que era o ponto
+do defeito 3.
+
+### O assistente Code
+
+Uma gramática de comandos determinística, não linguagem natural — porque não há
+credencial de LLM (ADR-008). Comandos funcionam hoje, são testáveis sem rede e
+não alucinam dados do Hub.
+
+| Comando | Responde |
+|---|---|
+| `/hoje` | Plano do dia com capacidade real cruzada |
+| `/capacidade [data]` | Tempo livre, descontando Compromissos |
+| `/revisoes [data]` | Revisões do dia, derivadas do Hub |
+| `/status <ID>` | Situação de um tópico, com R1/R2/R3 |
+| `/pendentes` | Dias atrasados |
+| `/fracos` | Tópicos em Reforço |
+| `/agenda [data]` | Compromissos do dia, por hora |
+| `/ajuda` | A lista, gerada do próprio registro de comandos |
+
+O parser é tolerante (`/hoje`, `hoje`, `HOJE`, `/revisões`, `revis`, `/status: F04`)
+mas **não casa prefixos de menos de 4 letras**, para não transformar um texto
+solto num comando por acidente. Argumentos preservam a caixa, porque os IDs do
+Hub são `F04`, não `f04`. Texto não reconhecido **nunca falha em silêncio**:
+devolve "não entendi" com a lista de comandos.
+
+**Duas entradas, uma fila.** `atenderFila()` lê o **Terminal do Code** (a
+interface na página, acionada pelo checkbox `Enviar`) e os comandos de texto da
+**Central de Comandos** (`Comando` = Tirar dúvida ou Outro). O Terminal vem
+primeiro de propósito: quem acabou de digitar está olhando o display.
+
+**O display.** `injetarNoDisplay()` apaga os filhos do synced block
+`9d83ac917556430a92882008ff30cccf` e anexa a resposta formatada. É uma tela, não
+um histórico — o histórico fica na coluna `Resposta` de cada linha.
+
+Os handlers recebem `fontes` injetáveis, e é por isso que os 82 testes do Code
+rodam sem tocar na rede.
+
+### Redesign do Hub — o que foi feito, e o que não é possível
+
+Tudo abaixo foi aplicado **e verificado por re-fetch** (ADR-010).
+
+| Pedido | Estado | Como |
+|---|---|---|
+| Bloco de 3 colunas com margens | ✅ | `14/72/14`, laterais com `<empty-block/>`. Ratios vão verbatim e o render é proporcional à **soma**, então precisam somar 100 |
+| Callout de metas sem o vermelho | ✅ | `red_bg` removido; agora default |
+| Ícone da página monocromático | ✅ | `icons/activity_gray` — `iconMetadata` confirma `type: "icon"` |
+| Ícones dos blocos monocromáticos | ✅ | 9 abas + 4 callouts, todos `icons/*_gray` |
+| Terminal do Code, inline, view de Lista | ✅ | List view **não tem linhas de grade por natureza** — o requisito se satisfaz sozinho |
+| Bloco sincronizado para o display | ✅ | Criado, com o id registrado |
+| …com fundo `gray_background` | ⚠️ **impossível no bloco** | Ver abaixo |
+| Galeria em Biblioteca de Apostilas | ✅ | View `Galeria`, `cardSize: small` |
+| Galeria em Próximos marcos | ✅ | Não existia banco; a galeria sai do `Compromissos` |
+| Cartão pequeno | ✅ | `COVER "<prop>" SIZE small` → grava `cardSize: "small"` |
+| Ocultar conteúdo interno do cartão | ❌ **impossível** | Ver abaixo |
+
+**Synced block não aceita cor própria.** Medido: o atributo `color` é aceito com
+`200` e **silenciosamente descartado** — é o caso que originou o ADR-010. O
+painel cinza foi obtido com um `<callout color="gray_bg">` **dentro** do synced
+block, que é visualmente equivalente e sobrevive ao re-fetch. O bloco que o
+script escreve continua sendo o synced block; o callout é só a moldura.
+
+**Ocultar o preview do cartão não tem caminho.** O "Card preview → None" da
+interface não é exposto pelo DSL de views nem por nenhuma ferramenta; `COVER` só
+aponta para uma propriedade Files, nunca para "none". Pior: a serialização de
+view nunca emite a chave `cover` para esse estado, então **nem seria
+verificável**. É um clique na UI do Notion, e foi deixado para você.
+
+**Onde as colunas de margem NÃO foram aplicadas, e por quê.** O bloco de 3
+colunas envolve o topo (Code + metas), onde largura estreita ajuda. Não envolve
+as seções de banco (`Hoje`, `Pontos fracos`) por duas razões concretas: o Notion
+**não permite colunas dentro de colunas**, e a seção `Próximos marcos / Domínio`
+já é um bloco de colunas; e comprimir uma tabela inline a 72% da largura produz
+rolagem horizontal, que é o oposto de limpo. Se quiser a página toda mais
+estreita, o caminho nativo é desligar **Full width** no menu `⋯` da página — um
+clique, sem custo estrutural.
+
+**A lista de marcos virou galeria do `Compromissos`.** Os bullets escritos à mão
+tinham os pontos de cada avaliação; isso agora vive no campo `Observação` do
+banco, então nada se perdeu. O ganho: as datas passam a ter **uma fonte só** e a
+galeria se atualiza quando a coordenação remarcar algo — o que a lista digitada
+nunca fez. É a mesma troca do item 1.
 
 ---
 
-## 8. Diário de bordo
+## 8. Status das integrações
+
+| # | Integração | Status | Nota |
+|---|---|---|---|
+| 1 | Autenticação na API do Notion | ✅ Operacional | `users/me` e `users` em 200 |
+| 2 | Transporte axios + shim do SDK | ✅ Operacional | ADR-001 |
+| 3 | Mapeamento de IDs | ✅ Completo | 9 páginas, 11 bancos, 7 blocos/views |
+| 4 | `diagnostico()` | ✅ Operacional | 11 bancos + 3 páginas de skill |
+| 5 | Lógica pura | ✅ Testada | 176 asserções, `npm test` |
+| 6 | Banco `Compromissos` | ✅ Criado e semeado | 10 blocos; durações pendentes |
+| 7 | Banco `Auditoria de Agentes` | ✅ Criado | Aguarda a primeira auditoria |
+| 8 | Banco `Terminal do Code` | ✅ Criado, inline, 4 exemplos | View de lista |
+| 9 | Redesign do Hub | ✅ Aplicado e verificado | Seção 7 |
+| 10 | Galerias com cartão pequeno | ✅ Aplicado | `cardSize: small` confirmado |
+| 11 | `lerCronograma` / `lerCompromissos` | 🟡 Codificado, não validado | Bloqueio da seção 3 |
+| 12 | `reconciliarRevisoes()` | 🟡 Codificado, não validado | Dry-run por padrão |
+| 13 | `otimizarAgentes()` determinístico | 🟡 Codificado, lógica testada | Injeção não exercitada |
+| 14 | `promoverPedidos()` | 🟡 Codificado, lógica testada | Dry-run por padrão |
+| 15 | `atenderFila()` + `injetarNoDisplay()` | 🟡 Codificado, lógica testada | O append REST no synced block não foi exercitado |
+| 16 | `otimizarAgentes()` por LLM | ⬜ Escrito, não exercitado | Sem credencial (ADR-008) |
+| 17 | Ocultar preview do cartão | ⬜ Impossível por API | Um clique na UI |
+| 18 | Ponte Anki | ⬜ Fora de escopo | Vive no Make |
+
+**Leitura honesta:** tudo que é estrutura está feito e verificado no Notion.
+Tudo que é execução recorrente está escrito e com a lógica testada, mas **nenhum
+caminho de escrita do código foi exercitado contra o Notion**, porque a
+integração `ClaudeCode` continua sem ver nada. As escritas destrutivas são
+dry-run por padrão (ADR-006), então a primeira execução real mostra o diff antes
+de gravar.
+
+---
+
+## 9. Diário de bordo
+
 
 ### 2026-10-08 · Sessão 1 — fundação
 - Reconhecimento do ambiente: Node 22.22, repositório vazio, branch correta.
@@ -488,10 +662,43 @@ vai te mostrar o diff antes de tocar em qualquer coisa.
   um comportamento que valia asseverar melhor: um mesmo dia acumula marcadores
   diferentes (13/10 recebe R1 de F04/F05 e R2 de N03).
 
+### 2026-10-08 · Sessão 3 — o Code, a pendência 3 e o redesign
+- `--aplicar` **não pôde rodar**: o diagnóstico seguiu `0/11`. Saber o ID da
+  integração não concede acesso. Reconfirmado com três sondas (seção 3).
+- Decidido não travar: estrutura pelo MCP, execução no código → ADR-009.
+- **Sondado antes de tocar no Hub.** Cinco investigações paralelas numa página
+  descartável, mais um verificador adversarial, para não errar na página de
+  verdade. Rendeu quatro achados que mudaram o plano:
+  - Colunas laterais **vazias funcionam**; ratios vão verbatim e o render é
+    proporcional à soma, logo precisam somar 100.
+  - `<synced_block color>` é aceito com 200 e **descartado em silêncio** → ADR-010.
+  - 45 identificadores de ícone nativo confirmados, com a regra de nomenclatura
+    e a assimetria de leitura/escrita → ADR-012.
+  - **Cartão pequeno é possível** via `COVER "<prop>" SIZE small`; ocultar o
+    preview do cartão **não tem caminho** por API.
+- Escrito `src/code.js`: gramática de 8 comandos, dupla entrada (Terminal +
+  Central), injeção no display, e `promoverPedidos()` fechando a pendência 3.
+- Redesign do Hub aplicado e **verificado por re-fetch**: colunas 14/72/14,
+  callout de metas sem o vermelho, ícone de página e das 9 abas monocromáticos,
+  Terminal inline com view de lista, synced block de display, duas galerias com
+  `cardSize: small`, títulos sem emoji.
+- Criado o banco `Terminal do Code` com 4 comandos de exemplo.
+- `test/code.test.js`: **82 asserções**, todas passando. Total do projeto: 176.
+- Nenhum `<page>` ou banco perdido no redesign — conferido tag por tag, usando
+  `update_content` ancorado em vez de `replace_content` (ADR-011).
+
 **Próxima sessão começa por:**
-1. `node index.js diagnostico` — confirmar se o compartilhamento chegou ao `ClaudeCode`.
-2. `node index.js revisoes` (dry-run) — ler o diff antes de aplicar.
-3. Preencher as durações em `Compromissos` e resolver as pendências do item 2.
-4. Primeira auditoria real para exercitar o loop do item 3 ponta a ponta.
-5. Defeito 3 ainda aberto: promover `📥 Pedir` do Cronograma a pedido formal
-   na Central de Comandos, fazendo dela a única fila de trabalho.
+1. **O compartilhamento.** `node index.js diagnostico` tem de dar `11/11`. Até
+   lá, nenhum comando de escrita do código funciona — e é só isso que separa o
+   sistema de estar no ar.
+2. `node index.js revisoes` (dry-run) → ler o diff → `--aplicar`.
+3. `node index.js promover` (dry-run) → `--aplicar`.
+4. `node index.js fila --aplicar` para exercitar o display ponta a ponta. É o
+   único caminho ainda não exercitado nem em lógica nem em rede: o append REST
+   dentro do synced block.
+5. Preencher as durações em `Compromissos` (sem elas os dias saem como
+   `indeterminado`) e resolver: hora do IESC II, dia do tutorial B4, subturma do
+   ECG, e cadastrar Atlética/Liga e treino físico.
+6. Primeira auditoria real para fechar o ciclo do item 3.
+7. Opcional, um clique seu na UI: "Card preview → None" nas duas galerias, que a
+   API não alcança.

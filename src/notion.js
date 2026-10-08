@@ -39,6 +39,7 @@ const IDS = {
     repositorioVisual: 'f038c9b39ac64baa8a2487598b4fbd63',
     compromissos: 'ebb4eacd50eb40249d20cc124a7078b6',       // criado em 2026-10-08
     auditoriaAgentes: '163ee7f987324454a8578e8e0760fb2a',     // criado em 2026-10-08
+    terminalCode: 'e13980fc76b447cf824c5eebe584335d',         // criado em 2026-10-08
   },
   /** data_source_id para a migração futura à API 2025-09-03 (ADR-002). */
   colecoes: {
@@ -52,6 +53,16 @@ const IDS = {
     repositorioVisual: '72d53f7b-18bc-4fac-92d6-24d68cd10689',
     compromissos: '1de67c6f-c1b3-49f3-a24a-2ed3fb8cc7f3',
     auditoriaAgentes: '8e7588a0-bdc9-4cba-96c3-070aadc93476',
+    terminalCode: '7cdb5b46-1af5-4535-b4d3-129592c60bd9',
+  },
+  /**
+   * Blocos nomeados dentro de páginas. Preenchidos quando o bloco é criado —
+   * a API do Notion não permite buscar bloco por nome, então o id é registrado
+   * aqui. `null` faz o código varrer a página para descobri-lo.
+   */
+  blocos: {
+    // Synced block do Hub onde o Code injeta as respostas. Criado em 2026-10-08.
+    displayCode: '9d83ac917556430a92882008ff30cccf',
   },
   /** Agente (opção de select na Auditoria) → página da skill a ser reescrita. */
   agentes: {

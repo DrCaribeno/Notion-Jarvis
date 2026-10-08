@@ -4,12 +4,14 @@
   "description": "Jarvis - ecossistema de automacao do Notion (Hub Central MED 1.5)",
   "main": "index.js",
   "scripts": {
-    "test": "node test/logica.test.js",
+    "test": "node test/logica.test.js && node test/code.test.js",
     "diagnostico": "node index.js diagnostico",
     "cronograma": "node index.js cronograma --hoje --capacidade",
     "revisoes": "node index.js revisoes",
     "otimizar": "node index.js otimizar",
-    "ajuda": "node index.js ajuda"
+    "ajuda": "node index.js ajuda",
+    "code": "node index.js code",
+    "promover": "node index.js promover"
   },
   "repository": {
     "type": "git",

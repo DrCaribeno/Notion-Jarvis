@@ -11,6 +11,7 @@
  *   src/cronograma.js   leitura do plano diário
  *   src/revisoes.js     reconciliação das revisões com o Hub
  *   src/agentes.js      fila de pedidos e loop de autoaperfeiçoamento
+ *   src/code.js         assistente Code: fila, comandos e display no Hub
  */
 
 'use strict';
@@ -20,6 +21,7 @@ const Compromissos = require('./src/compromissos');
 const Cronograma = require('./src/cronograma');
 const Revisoes = require('./src/revisoes');
 const Agentes = require('./src/agentes');
+const Code = require('./src/code');
 
 const { IDS, http, notion } = N;
 
@@ -241,6 +243,76 @@ const COMANDOS_CLI = {
     console.log(`\n✅ Pedido ${r.acao}: "${r.pedido}"\n   ${r.url}\n`);
   },
 
+  async promover(args) {
+    const aplicar = args.includes('--aplicar');
+    const r = await Code.promoverPedidos({ aplicar });
+
+    console.log(`\n📥 Promoção de pedidos ${aplicar ? '(APLICANDO)' : '(simulação)'}\n` + '─'.repeat(62));
+    console.log(`Dias avaliados: ${r.diasAvaliados} · marcados "${Code.PEDIR}": ${r.aPromover.length}\n`);
+    for (const a of r.aPromover) {
+      console.log(`▸ ${a.data} → "${a.titulo}"`);
+      console.log(`  ${a.detalhes}`);
+      if (a.topicos.length) console.log(`  ${a.topicos.length} tópico(s) ligados`);
+    }
+    if (!r.aPromover.length) console.log('(nenhum dia pedindo apostila)');
+    if (aplicar && r.promovidos) {
+      console.log(`\n✅ ${r.promovidos} promovido(s); os dias passaram a "${Code.GERANDO}".`);
+      for (const x of r.resultados) console.log(`   ${x.pedidoUrl}`);
+    }
+    if (!aplicar && r.aPromover.length) {
+      console.log('\nSimulação. Para gravar: node index.js promover --aplicar');
+    }
+    console.log('');
+  },
+
+  async code(args) {
+    const aplicar = args.includes('--aplicar');
+    const texto = args.filter((a) => !a.startsWith('--')).join(' ');
+    if (!texto) {
+      console.error('Uso: node index.js code "<comando>" [--aplicar]');
+      console.error(`Comandos: ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const resposta = await Code.executar(texto);
+    console.log(`\n❯ ${texto}\n` + '─'.repeat(62));
+    console.log(`${resposta.titulo}\n`);
+    for (const b of resposta.blocos || []) {
+      console.log(`${b.t === 'b' ? '  • ' : b.t === 'h' ? '\n' : '  '}${b.texto}`);
+    }
+    if (aplicar) {
+      const inj = await Code.injetarNoDisplay(resposta, {
+        marcaTempo: new Date().toISOString().slice(0, 16).replace('T', ' '),
+      });
+      console.log(`\n✅ Injetado no display ${inj.displayId}` +
+        ` (−${inj.blocosRemovidos} blocos, +${inj.blocosInjetados})`);
+    } else {
+      console.log('\nNão injetado. Para mandar ao display do Hub: --aplicar');
+    }
+    console.log('');
+  },
+
+  async fila(args) {
+    const aplicar = args.includes('--aplicar');
+    const r = await Code.atenderFila({ aplicar });
+
+    console.log(`\n🧾 Fila do Code ${aplicar ? '(APLICANDO)' : '(simulação)'}\n` + '─'.repeat(62));
+    console.log(`Pendentes de texto na Central: ${r.naFila}\n`);
+    for (const a of r.atendidos) {
+      console.log(`▸ "${a.pedido}"`);
+      console.log(`  ❯ ${a.texto}`);
+      console.log(`  ${a.resposta.titulo}`);
+      for (const b of a.resposta.blocos || []) console.log(`    • ${b.texto}`);
+    }
+    if (!r.atendidos.length) console.log('(nada a atender)');
+    if (r.injecao) console.log(`\n✅ Display atualizado: ${r.injecao.displayId}`);
+    if (!aplicar && r.atendidos.length) {
+      console.log('\nSimulação. Para responder e injetar: node index.js fila --aplicar');
+    }
+    console.log('');
+  },
+
   ids() { console.log(JSON.stringify(IDS, null, 2)); },
 
   ajuda() {
@@ -265,6 +337,18 @@ Jarvis · automação do Notion
 
   node index.js agente "<pedido>" "<comando>" ["<detalhes>"]
                                              Cria ou atualiza pedido na Central de Comandos
+
+  — Assistente Code —
+
+  node index.js promover [--aplicar]         Promove "📥 Pedir" do Cronograma a
+      pedido formal na Central de Comandos, que passa a ser a única fila
+
+  node index.js code "<comando>" [--aplicar] Executa um comando do Code.
+      Com --aplicar, injeta a resposta no display do Hub
+      ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}
+
+  node index.js fila [--aplicar]             Atende os comandos de texto da fila
+      e injeta a última resposta no display
 
   node index.js ids                          Mapa de IDs
   node index.js ajuda                        Esta mensagem
@@ -312,6 +396,16 @@ module.exports = {
   reconciliarRevisoes: Revisoes.reconciliarRevisoes,
   otimizarAgentes: Agentes.otimizarAgentes,
   injetarDiretrizes: Agentes.injetarDiretrizes,
+  // Code
+  COMANDOS_CODE: Code.COMANDOS_CODE,
+  interpretar: Code.interpretar,
+  dataDosArgumentos: Code.dataDosArgumentos,
+  executarCode: Code.executar,
+  paraBlocosNotion: Code.paraBlocosNotion,
+  promoverPedidos: Code.promoverPedidos,
+  atenderFila: Code.atenderFila,
+  injetarNoDisplay: Code.injetarNoDisplay,
+  encontrarDisplay: Code.encontrarDisplay,
   // puro / testável
   lerPropriedade: N.lerPropriedade, lerPropriedades: N.lerPropriedades,
   consultarBanco: N.consultarBanco, dataDeFormula: N.dataDeFormula,
@@ -325,5 +419,5 @@ module.exports = {
   sintetizarDiretriz: Agentes.sintetizarDiretriz,
   TAXONOMIA: Agentes.TAXONOMIA,
   // submódulos
-  N, Compromissos, Cronograma, Revisoes, Agentes,
+  N, Compromissos, Cronograma, Revisoes, Agentes, Code,
 };
