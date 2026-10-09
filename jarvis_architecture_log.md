@@ -1000,16 +1000,43 @@ começa quando a professora envia o material. → ADR-016.
   antigas ("que prova vem?" segue sendo agenda).
 - `diagnostico`: autenticação ok, **0/12** bancos — o bloqueio da seção 3 persiste.
 
+### 2026-10-09 · Sessão 6, adendo — a gerência vem para o Claude Code
+Pedido do Breno: "como faço para a gerência e liderança vir para cá? Code deve ter
+prioridade; não sou programador, criar as linhas é inviável."
+
+- **Descoberto** que já existia uma Rotina do Claude Code,
+  `Rotina diária 5h · MED 1.5` (`trig_01FvcPvuHey3ZHyuSPtTwiuJ`), disparando
+  todo dia às 4h58 (Boa Vista) numa sessão nova com os conectores Notion, Google
+  Drive, Make e Claude Docs — e rodando com sucesso (última execução 09/10 08:58 UTC).
+  O prompt dela ainda era do modelo de apostila. **É esse o mecanismo de gerência**:
+  não a tarefa agendada do app, não o código via integração.
+- **Rotina reescrita** (`update_trigger`, só o prompt; cron e conectores intactos):
+  segue as skills novas, lê **quatro caixas de entrada** nesta ordem — Materiais da
+  Aula com Kit Novo/Gerando · pasta `Entrada MED 1.5` do **Google Drive** · Central
+  de Comandos pendente · dias com `📥 Pedir` —, **cria as linhas ela mesma** (o Breno
+  não preenche banco), gera o kit, e termina com a notificação de 8 linhas.
+- **Caixa de entrada criada no Google Drive:** pasta `Entrada MED 1.5`
+  (`1JEl86nOj1Q2CYmD5ggbrQybPrHNcMhIw`, raiz do Meu Drive). O Breno solta o
+  arquivo; a URL do Drive vira o `Link` da linha, que é a chave contra duplicação.
+  Segunda entrada: mandar o material numa sessão do Claude Code em linguagem natural.
+- Hub (callout de Materiais e *Como usar*), skill Kit de estudo (gatilhos) e Motor
+  (*Como pedir*, *Agendamento*) atualizados para dizer isso.
+- **Consequência para a seção 3:** o compartilhamento da integração `ClaudeCode`
+  deixa de ser pré-requisito do sistema. A Rotina age como o Breno pelo conector
+  MCP, que vê tudo. O código REST (`index.js`) continua útil como ferramenta de
+  conferência e dry-run e passa a funcionar quando o compartilhamento for feito —
+  mas o sistema **já está no ar sem ele**.
+
 **Próxima sessão começa por:**
-1. **O compartilhamento.** `node index.js diagnostico` tem de dar `12/12`. Até
-   lá, nenhum comando de escrita do código funciona — e é só isso que separa o
-   sistema de estar no ar.
-2. **Primeiro material real.** Breno cria a linha em `Materiais da Aula` (o
-   problema do T2 ou a próxima aula) com `Kit = 📥 Novo`; a rotina das 5h (ou
-   `Kit: <material>` no chat) gera o primeiro kit. Conferir: Objetivos e Sinais
+1. **Primeiro material real, sem criar linha:** Breno solta o problema do T2 ou a
+   próxima aula na pasta `Entrada MED 1.5` do Drive (ou manda no Claude Code).
+   A rotina das 4h58 cria a linha e o kit. Conferir de manhã: Objetivos e Sinais
    preenchidos, cards na Fila Anki com `Formato` e `Material`, Hub com
-   `Status dos Flashcards = Na fila`.
-3. `node index.js materiais` (dry-run) → `--aplicar`, quando a integração enxergar.
+   `Status dos Flashcards = Na fila`, Diário com a linha do dia.
+2. Se não quiser esperar as 5h: pedir "roda a rotina" numa sessão do Claude Code,
+   ou `fire_trigger` em `trig_01FvcPvuHey3ZHyuSPtTwiuJ`.
+3. **O compartilhamento** (opcional agora): `node index.js diagnostico` em `12/12`
+   libera os dry-runs do código (`materiais`, `revisoes`, `promover`, `fila`).
 4. `node index.js revisoes` (dry-run) → `--aplicar`; `promover` idem.
 5. `node index.js fila --aplicar` para exercitar o display ponta a ponta.
 6. Preencher as durações em `Compromissos` e resolver: hora do IESC II, dia do
