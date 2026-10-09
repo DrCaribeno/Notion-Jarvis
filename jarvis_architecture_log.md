@@ -1027,8 +1027,38 @@ prioridade; não sou programador, criar as linhas é inviável."
   conferência e dry-run e passa a funcionar quando o compartilhamento for feito —
   mas o sistema **já está no ar sem ele**.
 
+### 2026-10-09 · Sessão 6, adendo 2 — o primeiro kit real
+O Breno mandou no chat os dois PDFs da aula de 08/10 (instruções de abertura do
+módulo, 19 p.; roteiro de slides da Conf. 1 "A Máquina Elétrica", Profa. Bruna
+Bassoli, 56 p.) e se ausentou autorizando tudo. Rodei a skill Kit de estudo à mão.
+
+- **Materiais da Aula:** 2 linhas, Kit ✅ Pronto. A de abertura é `Aviso` (sem
+  cards): aplicou o calendário oficial em **Compromissos** (tutorial B4 → Seg e
+  Qui, 2 h; TBL/AC1/AC2/vistas/ECG/Mini-OSCE/exame → 2 h; +8 linhas: Conf. 2–6,
+  VA2, VA3, plantão de embriologia inativo). A da Conf. 1 cobre F01–F07 e N10,
+  com `Objetivos de estudo`, `Sinais de prova` (tudo o que ela circulou em
+  vermelho) e o resumo de uma tela no corpo.
+- **Fila Anki:** 22 cards Rascunho (8 `Exercício`, 14 `Flashcard`; 5 Cloze),
+  cada um com `Tópico`, `Material`, `Tags` e `Fonte` com página do slide.
+- **Hub:** F03–F07 e N10 → `Status dos Flashcards = Na fila`. **Cronograma:**
+  08–11/10 ligados ao material em `Materiais do dia`. **Diário:** linha
+  `Rotina 5h` de 09/10. **Perfil:** padrão da professora anotado.
+- **Medido — upload de arquivo pelo MCP atrás do proxy:** `create-file-upload`
+  devolve uma URL em `api.notion.com` com um bearer próprio; o agent proxy
+  **sobrescreve** esse header com a autenticação da integração `ClaudeCode`, e
+  o envio responde `401 "file upload authorization is invalid"`. Resolvido com
+  `curl --noproxy '*'` (o host é alcançável direto). Depois, a propriedade
+  `Arquivo` **não aceita** o id do upload na criação (`File … not found`); o PDF
+  entrou pelo corpo da página com `<pdf src="file-upload://…">`, que funciona.
+  Regra para a Rotina: anexar pelo corpo, não pela propriedade Files.
+- Ainda **sem** cópia na pasta `Entrada MED 1.5` do Drive: o upload via conector
+  exige o arquivo em base64 no corpo da chamada (6,3 MB → ~8,5 MB de texto).
+  Não vale o custo; o Notion já guarda o PDF.
+
 **Próxima sessão começa por:**
-1. **Primeiro material real, sem criar linha:** Breno solta o problema do T2 ou a
+0. **Breno:** aprovar (ou descartar) os 22 cards Rascunho na Fila Anki e rodar
+   `sincronizar_anki.bat`; confirmar hora/duração do IESC II e a subturma do ECG.
+1. **Próximo material real, sem criar linha:** Breno solta o problema do T2 ou a
    próxima aula na pasta `Entrada MED 1.5` do Drive (ou manda no Claude Code).
    A rotina das 4h58 cria a linha e o kit. Conferir de manhã: Objetivos e Sinais
    preenchidos, cards na Fila Anki com `Formato` e `Material`, Hub com
