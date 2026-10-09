@@ -43,6 +43,21 @@ async function lerTopicosHub() {
         R3: p['Revisão Ativa 3'],
         PP: p['Revisão Pré-Prova'],
       },
+      // Métricas gravadas pelo sincronizar_anki.ps1 — a base do placar (sessão 6).
+      anki: {
+        cards: p['Anki · cards'],
+        vistos: p['Anki · vistos'],
+        consolidados: p['Anki · consolidados'],
+        lapsos: p['Anki · lapsos'],
+        revisoes: p['Anki · revisões'],
+        retencao: p['Anki · retenção'],
+        questoesFeitas: p['Anki · questões feitas'],
+        questoesCertas: p['Anki · questões certas'],
+        ultimaRevisao: N.soData(p['Anki · última revisão']?.inicio),
+        atualizadoEm: N.soData(p['Anki · atualizado em']?.inicio),
+      },
+      indiceDominio: p['Índice de domínio'],
+      statusFlashcards: p['Status dos Flashcards'],
     };
   });
 }

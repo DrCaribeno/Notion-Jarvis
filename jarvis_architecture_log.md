@@ -8,25 +8,26 @@
 > tabela de mapeamento abaixo.
 
 - **Projeto:** Notion-Jarvis — ecossistema de automação do Notion de Breno
-- **Repositório:** `DrCaribeno/Notion-Jarvis` · branch `claude/notion-jarvis-automation-dd2wz6`
+- **Repositório:** `DrCaribeno/Notion-Jarvis` · branch `claude/dazzling-lovelace-5zsw5b` (sessões 1–5 em `claude/notion-jarvis-automation-dd2wz6`)
 - **Runtime:** Node.js v22.22.0 · npm 10.9.4 (sessão em nuvem, container efêmero)
 - **Workspace Notion:** `Breno's Notion` (`12dd846f-533a-450e-8778-504592474043`)
 - **Integração (bot):** `ClaudeCode` (`3f34414d-ac76-81ff-957c-002778ff3e0b`), tipo *workspace bot*
-- **Última atualização:** 2026-10-08 (sessão 5)
+- **Última atualização:** 2026-10-09 (sessão 6)
 
 ### Estrutura do código
 ```
 index.js              ponto de entrada, CLI e API pública
 src/notion.js         transporte, mapa de IDs, normalização, datas, blocos
 src/compromissos.js   blocos de tempo e capacidade real do dia      (item 2)
-src/cronograma.js     leitura do plano diário
-src/revisoes.js       reconciliação das revisões com o Hub          (item 1)
+src/cronograma.js     leitura do plano diário (Kit de estudo, Materiais do dia)
+src/revisoes.js       reconciliação das revisões com o Hub + métricas Anki · (item 1)
 src/agentes.js        fila de pedidos e loop de autoaperfeiçoamento (item 3)
+src/materiais.js      materiais da professora → kit; objetivos de estudo; consolidação (sessão 6)
 src/code.js           assistente Code: fila, comandos e display no Hub
-test/logica.test.js   94 asserções sobre datas, capacidade, revisões, taxonomia
-test/code.test.js     133 asserções sobre conversa, handlers, cortesia e voz
+test/logica.test.js   127 asserções sobre datas, capacidade, revisões, taxonomia, materiais
+test/code.test.js     175 asserções sobre conversa, handlers, cortesia, voz e os comandos novos
 ```
-`npm test` roda as duas suítes: **227 asserções**.
+`npm test` roda as duas suítes: **302 asserções**.
 
 ---
 
@@ -38,13 +39,19 @@ O Jarvis **não** recria essa estrutura — ele a lê, cruza e mantém coerente.
 Três frentes, na ordem de prioridade acordada:
 
 1. **Gerenciar agentes.** Os "agentes" são as skills e rotinas do `Motor · Claude`
-   (Gerar Apostila, Rotina das 5h, Análise Semanal), acionados por linhas na
-   **Central de Comandos**. Jarvis cria, despacha e fecha esses pedidos por código.
+   (Kit de estudo — ex-Gerar Apostila —, Rotina das 5h, Análise Semanal), acionados
+   por linhas na **Central de Comandos**. Jarvis cria, despacha e fecha esses pedidos por código.
 2. **Integrar cronograma × agenda.** Reconciliar o `Cronograma de Ataque` (nível dia)
    com o `Hub Central de Controle` (nível tópico) e com os compromissos fixos do
-   módulo. Ver proposta na seção 6 — **ainda não implementado, aguarda decisão.**
+   módulo. Implementado na sessão 2 (seção 6).
 3. **Conectar as páginas do hub.** Usar as relations já existentes para que um
-   tópico, seu dia, sua apostila, suas questões e seus cards se encontrem sozinhos.
+   tópico, seu dia, seu material da professora, seus exercícios e seus cards se
+   encontrem sozinhos.
+
+**Mudança de modelo em 2026-10-09 (sessão 6, ADR-016):** a apostila em PDF saiu do
+fluxo. O estudo de um tema começa quando a professora envia o material; cada
+material vira um **Kit de estudo** (resumo objetivo + exercícios + flashcards no
+Anki); o Breno lê as referências por conta própria; as métricas vivem no Anki.
 
 ### Contexto humano (não perder de vista)
 Breno, 2º ano de Medicina na UFRR, refazendo o módulo MED 1.5 em paralelo ao 2º ano.
@@ -248,6 +255,41 @@ espera**, com o estado dito em palavras, e não ocupar o lugar mais nobre da
 página. O Jarvis Code foi inteiro para a aba Motor, com o motivo escrito no
 próprio bloco.
 
+### ADR-016 — O material da professora é o gatilho; o Anki é a fonte das métricas; o PDF saiu
+**Decisão (pedido do Breno em 2026-10-09):** aposentar a apostila em PDF e a
+apostila longa no Notion. O gatilho do estudo passa a ser a chegada de um
+material da professora (aula, slides, problema do tutorial, conferência, prática,
+texto, aviso), registrado no banco **Materiais da Aula**. Cada material gera um
+**Kit de estudo**: `Objetivos de estudo` e `Sinais de prova` como propriedades,
+um resumo de uma tela no corpo da página, e **exercícios + flashcards na Fila
+Anki** (`Formato` = Exercício / Flashcard). O Breno lê livros e artigos sozinho;
+o kit só aponta onde (*Onde ler*). As métricas (retenção, cobertura,
+consolidação, lapsos, acerto de primeira) vêm do Anki para o Hub, e é a partir
+delas que o Jarvis dá **sugestões de consolidação** (`src/materiais.js`, limiares
+explícitos em `LIMIARES`).
+
+**Por quê:** menos abas e menos complexidade de apresentação; a prática
+concentrada num só lugar (Anki) rende métricas comparáveis; e a coluna
+`Sinais de prova`, acumulada material a material, vira a base de dados do que a
+professora pretende cobrar — algo que nenhuma apostila genérica entregava.
+
+**O que mudou de nome, e o que ficou:** `Cronograma.Apostila` → `Kit de estudo`
+(RENAME COLUMN; os 7 valores `✅ Pronta` sobreviveram, conferido por SQL);
+`Central.Comando`: `Gerar apostila` → `Kit de estudo`, `Mini-apostila de correção`
+→ `Mini-kit de correção` (banco estava vazio, troca segura); `Auditoria.Agente`
+ganhou `Kit de estudo` **mantendo** `Gerar Apostila` (a API recusa mudar a cor de
+opção existente — *"Cannot update color of select"* — então a opção antiga ficou
+com a cor antiga, e `IDS.agentes` mapeia as duas para a mesma página de skill);
+`Biblioteca de Apostilas` → `Arquivo · Apostilas (modelo antigo)`, fora das abas.
+A relação `Apostila do dia` do Cronograma **não foi removida** (1 linha a usa; é
+legado, lida como `relacoes.apostilaDoDia`).
+
+**Make não mudou.** A Ponte Anki (`6547897`) lê `Status`, `Tipo`, `Frente`, `Verso`,
+`Tags` e `Tópico` da Fila Anki; adicionar `Formato` e `Material` não a afeta. Os
+exercícios entram como `Tipo = Básico` (enunciado na frente, gabarito comentado
+no verso) justamente para caber no modelo de nota que o `sincronizar_anki.ps1`
+já cria. O cenário Fisio 1 (Extração via Make) segue desligado e desnecessário.
+
 ### ADR-013 — Um banco nomeado sempre nasce com aba de tabela em primeiro lugar
 Medido: `notion-create-database` cria um `Default view` de tipo **table**, e ele
 fica em primeiro lugar. Não existe ferramenta para **apagar** uma view, para
@@ -321,7 +363,7 @@ completo embora a API da integração ainda responda 404.
 | 🧠 Motor · Claude | `3f24414dac76814f939ccc7e2b7cefcc` | Painel dos agentes |
 | Perfil de aprendizagem | `3f24414dac7681adb316e534fb21dddd` | Memória sobre o Breno |
 | Índice de materiais | `3f24414dac768103bd26ff0839c241b7` | Catálogo da pasta Fisiologia |
-| Skill · Gerar Apostila | `3f24414dac768199a591e16b34590b22` | **Agente** |
+| Skill · Kit de estudo (ex-Gerar Apostila, reescrita em 09/10) | `3f24414dac768199a591e16b34590b22` | **Agente** |
 | Skill · Rotina diária das 5h | `3f24414dac7681f4b803fa4e7f5510e3` | **Agente** |
 | Skill · Análise semanal | `3f24414dac7681a39f2accf2432eb736` | **Agente** |
 | Fase 4 · Blueprint de Automação | `3f24414dac768129a7dcda035dec69e6` | Make + Anki |
@@ -335,14 +377,18 @@ completo embora a API da integração ainda responda 404.
 | Hub Central de Controle (58 tópicos) | `c4891265091e45b794551d561b969fab` | `a374d5c8-4f9a-48fc-946e-4883b4f039ec` |
 | Central de Comandos | `637e5706ca2343df8044326c1b517c91` | `a4b69910-a163-4042-9a06-b2f6699343b6` |
 | Diário do Motor | `9975790b8f8149529b92884b242ee36b` | `0bd5b810-3fa5-4ea3-8fa9-813bd72da4fe` |
-| Biblioteca de Apostilas | `55d58868acc641a58708c6dfc0ce39e8` | `f6e5eb83-b268-4ff8-aa0f-c639239def90` |
+| Arquivo · Apostilas (modelo antigo) — era Biblioteca de Apostilas | `55d58868acc641a58708c6dfc0ce39e8` | `f6e5eb83-b268-4ff8-aa0f-c639239def90` |
 | Registro de Questões | `b8528bc3d95545bdb62ad7c6e4a0bc7d` | `eedd4b51-07b3-44b6-9071-1e00b30aa1d2` |
 | Fila Anki | `b30fa0bab1d84dc5a4d2767b7ccc6342` | `fd8e8e6d-ee4a-4ec1-9047-4b3cbdc56a4a` |
 | Repositório Clínico e Visual | `f038c9b39ac64baa8a2487598b4fbd63` | `72d53f7b-18bc-4fac-92d6-24d68cd10689` |
 | **Compromissos** ⭐ | `ebb4eacd50eb40249d20cc124a7078b6` | `1de67c6f-c1b3-49f3-a24a-2ed3fb8cc7f3` |
 | **Auditoria de Agentes** ⭐ | `163ee7f987324454a8578e8e0760fb2a` | `8e7588a0-bdc9-4cba-96c3-070aadc93476` |
 | **Terminal do Code** ⭐⭐ | `e13980fc76b447cf824c5eebe584335d` | `7cdb5b46-1af5-4535-b4d3-129592c60bd9` |
+| **Materiais da Aula** ⭐⭐⭐ | `414957ec97894b56bb1e557174a0ab0a` | `b5ef6625-14df-4710-bda4-929dbd7b9141` |
 
+⭐⭐⭐ criado na sessão 6, sob o Hub, inline no corpo da página. Criou as relações duais
+`Materiais da aula` (Hub de Controle), `Material` (Central de Comandos), `Cards e exercícios`
+(Fila Anki) e `Dias no cronograma` (Cronograma, onde a ponta se chama `Materiais do dia`).
 ⭐⭐ criado na sessão 3, inline no topo do Hub. ⭐ criados na sessão 2. `Compromissos` fica sob o Hub e criou a
 relação dual `Compromissos` no Cronograma de Ataque. `Auditoria de Agentes` fica
 sob o `Motor · Claude` e criou a relação dual `Auditorias` no Hub de Controle.
@@ -365,6 +411,15 @@ sob o `Motor · Claude` e criou a relação dual `Auditorias` no Hub de Controle
 | View `Terminal (lista)` | `view://3f34414d-ac76-812b-b9bb-000cd91d5d01` | A view do bloco da coluna. Única view do database vinculado |
 | View `Terminal` (aba no banco) | `view://3f34414d-ac76-8147-a047-000cfc68b38e` | Aba de lista no banco nomeado, que ainda tem `Default view` (table) na frente |
 
+### Blocos e views nomeados (sessão 6)
+
+| O que | ID | Observação |
+|---|---|---|
+| View `Todos` de Materiais da Aula (a padrão, renomeada) | `view://2d0a2bda-2766-46a7-bfa3-5e94d944f3a0` | Ordena por Recebido em desc |
+| View `Kit pendente` | `view://3f44414d-ac76-81c4-b853-000c37d2643d` | `Kit != ✅ Pronto`, mais antigo primeiro |
+| View `Objetivos de estudo` (aba no banco) | `view://3f44414d-ac76-8188-8848-000c17fc214b` | `Kit = ✅ Pronto`, com Objetivos e Sinais de prova |
+| **Bloco "Objetivos de estudo" no corpo do Hub** (view vinculada) | `53914513f88f4dd6a681a2aa3eb94b1d` | Criado pela tag `<database data-source-url>`; única view `view://f4cf709b-ac74-4a2c-adcb-b98c67cec653`, mesma configuração da aba. É database filho: reposicionar trocando de lugar, nunca removendo (ADR-011) |
+
 ---
 
 ## 5. Schemas que o código depende
@@ -380,13 +435,51 @@ Só as propriedades que o `index.js` lê ou escreve. Nome exato, com acento — 
 | `Semana` | select | `S1 · Fundação biofísica` … `S6 · OSCE e fechamento` |
 | `Horas` | number | Carga do dia — base do balanceamento futuro |
 | `Feito` | checkbox | **Status primário do dia** |
-| `Apostila` | select | `📥 Pedir` · `⏳ Gerando` · `✅ Pronta` — gatilho de agente |
+| `Kit de estudo` (era `Apostila` até 09/10) | select | `📥 Pedir` · `⏳ Gerando` · `✅ Pronta` — gatilho de kit para dia sem material da professora. O código lê `Kit de estudo` e cai em `Apostila` se o banco não tiver migrado |
 | `Ler` / `Resumir / Esquematizar` / `Exercício ativo` | text | Plano do dia |
-| `Revisões programadas` | text | ⚠️ texto livre — ver defeito na seção 6 |
-| `Eventos do módulo` | text | ⚠️ agenda em prosa — ver seção 6 |
+| `Revisões programadas` | text | derivado do Hub desde a sessão 2 (`⟳ derivado do Hub`) |
+| `Eventos do módulo` | text | agenda em prosa; a fonte estruturada é `Compromissos` |
 | `Tópicos` | relation → Hub | Ligação dia ↔ tópico |
-| `Apostila do dia` | relation → Biblioteca | Material do dia |
+| `Materiais do dia` | relation → Materiais da Aula | Materiais da professora que o dia estuda (sessão 6) |
+| `Apostila do dia` | relation → Arquivo · Apostilas | **Legado**, 1 linha; não removida |
 | `É hoje` | formula | Não filtrável por SQL; filtrar por `Data` |
+
+### Materiais da Aula — leitura e escrita (`src/materiais.js`, sessão 6)
+| Propriedade | Tipo | Quem preenche |
+|---|---|---|
+| `Material` | title | Breno (nome como a professora chamou) |
+| `Tipo` | select | Breno — `Aula` · `Slides` · `Problema do tutorial` · `Conferência` · `Prática` · `Texto / artigo` · `Aviso` |
+| `Recebido em` | date | Breno — **o estudo começa aqui** |
+| `Encontro` | text | Breno — `T2`, `Conf. 3`, `VA1`… |
+| `Tópicos` | relation → Hub (dual `Materiais da aula`) | Breno |
+| `Arquivo` / `Link` | files / url | Breno |
+| `Kit` | select | `📥 Novo` (Breno) → `⏳ Gerando` (Jarvis, `promoverMateriais`) → `✅ Pronto` ou `↩️ Preciso de info` (skill) |
+| `Objetivos de estudo` | text | Skill — 3 a 6 linhas; é o que vai na notificação |
+| `Sinais de prova` | text | Skill — o que a professora enfatizou; base do que ela cobra |
+| `Exercícios` / `Flashcards` | number | Skill — quantos entraram na Fila Anki |
+| `Baralho Anki` | text | Skill |
+| `Processado em` | date | Skill |
+| `Erros no kit` | text | Breno — vira Auditoria (Agente = Kit de estudo) |
+| `Pedido` | relation → Central (dual `Material`) | Jarvis |
+| `Cards e exercícios` | relation ← Fila Anki (`Material`) | Skill, ao criar os cards |
+| `Dias no cronograma` | relation ← Cronograma (`Materiais do dia`) | Skill / Breno |
+
+`promoverMateriais()` lê `Kit = 📥 Novo`, cria o pedido `Kit de estudo · <material> (<data>)`
+(chave de idempotência) e só então muda o material para `⏳ Gerando` e liga `Pedido`.
+Ordem de atendimento: `Problema do tutorial` → `Aula`/`Conferência` → `Slides` → `Prática`
+→ `Texto / artigo` → `Aviso`; dentro do tipo, o mais antigo primeiro.
+
+### Fila Anki — o que a sessão 6 acrescentou
+| Propriedade | Tipo | Observação |
+|---|---|---|
+| `Formato` | select | `Flashcard` · `Exercício`. Não muda o `Tipo` (Básico/Cloze) que a Ponte Anki lê |
+| `Material` | relation → Materiais da Aula | De onde o card veio |
+
+### Hub Central de Controle — campos Anki · lidos por `lerTopicosHub` (sessão 6)
+`Anki · cards`, `vistos`, `consolidados` (intervalo ≥ 14 d), `lapsos`, `revisões`, `retenção`
+(0–1), `questões feitas`, `questões certas`, `última revisão`, `atualizado em`; mais
+`Índice de domínio` (fórmula) e `Status dos Flashcards`. Gravados pelo `sincronizar_anki.ps1`
+via Ponte Anki. São a entrada de `sugestoesDeConsolidacao`.
 
 ### Hub Central de Controle — leitura
 Chave humana: `userDefined:ID` (texto: `F01`…`K10`). Título: `Tópico Fisiológico Granular`.
@@ -401,7 +494,8 @@ Rollups: `Acertos`, `Questões feitas`.
 | Propriedade | Tipo | Observação |
 |---|---|---|
 | `Pedido` | title | Chave de idempotência (ADR-003) |
-| `Comando` | select | `Gerar apostila` · `Mini-apostila de correção` · `Questões extras` · `Cards extras` · `Tirar dúvida` · `Ajustar cronograma` · `Análise semanal` · `Outro` |
+| `Comando` | select | `Kit de estudo` · `Mini-kit de correção` · `Questões extras` · `Cards extras` · `Tirar dúvida` · `Ajustar cronograma` · `Análise semanal` · `Outro` (os dois primeiros renomeados em 09/10) |
+| `Material` | relation → Materiais da Aula | Material que originou o pedido de kit (sessão 6) |
 | `Status` | select | `📥 Pendente` · `⏳ Em andamento` · `✅ Feito` · `↩️ Preciso de info` |
 | `Detalhes` | text | O que se quer |
 | `Resposta do Claude` | text | Retorno do agente |
@@ -428,7 +522,7 @@ Rollups: `Acertos`, `Questões feitas`.
 | Propriedade | Tipo | Quem preenche |
 |---|---|---|
 | `Auditoria` | title | Você |
-| `Agente` | select | Você — `Gerar Apostila` · `Rotina diária das 5h` · `Análise semanal` |
+| `Agente` | select | Você — `Kit de estudo` · `Gerar Apostila` (legado, mesma skill) · `Rotina diária das 5h` · `Análise semanal` |
 | `Classificação` | select | Você — `✅ Adequado` · `⚠️ Parcial` · `❌ Inadequado` |
 | `Observação` | text | **Você** — é a matéria-prima da diretriz |
 | `Output avaliado` | url | Você |
@@ -599,13 +693,16 @@ frase que cita um dia e nada mais cai no plano daquele dia.
 
 | Comando | Responde |
 |---|---|
-| `/hoje` | Plano do dia com capacidade real cruzada |
+| `/hoje` | Plano do dia com capacidade real cruzada, materiais ligados e estado do kit |
 | `/capacidade [data]` | Tempo livre, descontando Compromissos |
 | `/revisoes [data]` | Revisões do dia, derivadas do Hub |
 | `/status <ID>` | Situação de um tópico, com R1/R2/R3 |
 | `/pendentes` | Dias atrasados |
 | `/fracos` | Tópicos em Reforço |
 | `/agenda [data]` | Compromissos do dia, por hora |
+| `/objetivos [dias]` | (sessão 6) O que a professora quer: objetivos e sinais de prova dos kits prontos na janela |
+| `/materiais` | (sessão 6) Materiais da professora ainda sem kit, na ordem de atendimento |
+| `/consolidar [ID]` | (sessão 6) Como o aprendizado está consolidando, lido nos campos Anki · do Hub |
 | `/ajuda` | A lista, gerada do próprio registro de comandos |
 
 O parser é tolerante (`/hoje`, `hoje`, `HOJE`, `/revisões`, `revis`, `/status: F04`)
@@ -695,14 +792,20 @@ nunca fez. É a mesma troca do item 1.
 | 15 | `atenderFila()` + `injetarNoDisplay()` | 🟡 Codificado, lógica testada | O append REST no synced block não foi exercitado |
 | 16 | `otimizarAgentes()` por LLM | ⬜ Escrito, não exercitado | Sem credencial (ADR-008) |
 | 17 | Ocultar preview do cartão | ⬜ Impossível por API | Um clique na UI |
-| 18 | Ponte Anki | ⬜ Fora de escopo | Vive no Make |
+| 18 | Ponte Anki | ⬜ Fora de escopo | Vive no Make; não precisou mudar (ADR-016) |
+| 19 | Banco `Materiais da Aula` + 4 relações duais | ✅ Criado e verificado | Sessão 6; 3 views configuradas |
+| 20 | Schemas migrados (Cronograma, Fila Anki, Central, Auditoria, Arquivo) | ✅ Aplicado e verificado | Valores preservados (7 × `✅ Pronta` conferidos por SQL) |
+| 21 | Skills reescritas (Kit de estudo, Rotina 5h, Análise semanal) + página Motor | ✅ Aplicado e verificado | Sem PDF; Anki como base |
+| 22 | Hub reestruturado: 8 abas → 5, Materiais/Objetivos/Consolidação no corpo | ✅ Aplicado e verificado por re-fetch | 23 tags preservadas |
+| 23 | `promoverMateriais()` | 🟡 Codificado, lógica testada | Dry-run por padrão; bloqueio da seção 3 |
+| 24 | `/objetivos`, `/materiais`, `/consolidar` + `sugestoesDeConsolidacao` | 🟡 Codificado, lógica testada | Limiares em `LIMIARES` |
 
 **Leitura honesta:** tudo que é estrutura está feito e verificado no Notion.
 Tudo que é execução recorrente está escrito e com a lógica testada, mas **nenhum
 caminho de escrita do código foi exercitado contra o Notion**, porque a
-integração `ClaudeCode` continua sem ver nada. As escritas destrutivas são
-dry-run por padrão (ADR-006), então a primeira execução real mostra o diff antes
-de gravar.
+integração `ClaudeCode` continua sem ver nada (`diagnostico` em 0/12 na sessão 6).
+As escritas destrutivas são dry-run por padrão (ADR-006), então a primeira
+execução real mostra o diff antes de gravar.
 
 ---
 
@@ -849,18 +952,67 @@ Três pedidos do Breno, e o primeiro derrubou uma premissa minha.
   mudado — exatamente o comportamento desejado: âncora que não casa não grava
   nada. Reli e refiz.
 
+### 2026-10-09 · Sessão 6 — a apostila saiu; o material da professora entrou
+Pedido do Breno: tirar a apostila em PDF da jogada; resumos simples e objetivos
+para guiar as notificações; métricas concentradas no Anki; exercícios e
+flashcards como padrão a cada aula, tutorial ou slide; menos abas; o estudo
+começa quando a professora envia o material. → ADR-016.
+
+- **Levantamento antes de mexer:** Central de Comandos vazia (renomear opções era
+  seguro); Cronograma com 7 dias em `✅ Pronta` (RENAME COLUMN preserva; conferido
+  por SQL depois); Biblioteca com 1 apostila; Fila Anki com 18 cards; Make com
+  Ponte Anki e Supervisor ligados, Fisio 1 e 2 desligados.
+- **Banco `Materiais da Aula`** criado sob o Hub com 16 propriedades e 4 relações
+  duais (Hub, Central, Fila Anki, Cronograma). Três views: `Todos`, `Kit pendente`,
+  `Objetivos de estudo`.
+- **Schemas:** `Cronograma.Apostila` → `Kit de estudo` + `Materiais do dia`;
+  `Fila Anki` + `Formato` + `Material`; `Central.Comando` sem "apostila";
+  `Auditoria.Agente` + `Kit de estudo`; `Biblioteca` → `Arquivo · Apostilas (modelo antigo)`.
+- **Medido:** a API recusa mudar a cor de uma opção de select existente
+  (`Cannot update color of select with name: Gerar Apostila`). Refeito mantendo
+  a cor antiga. Regra: ao fazer `ALTER COLUMN SET SELECT`, repetir cor e nome das
+  opções que já existem.
+- **Skills reescritas pelo MCP:** `Gerar Apostila` virou **Kit de estudo** (gatilhos,
+  entradas, 5 partes do resumo, exercícios e flashcards na Fila Anki, fechamento,
+  notificação de 5 linhas, casos especiais); `Rotina das 5h` passo a passo sem PDF,
+  com sugestões de consolidação e notificação de 8 linhas; `Análise semanal` com
+  mini-kit no Anki e "padrão da professora". Página Motor atualizada por
+  `update_content` ancorado (13 substituições).
+- **Hub reestruturado por `replace_content`**, com as 23 tags de página, banco,
+  arquivo e synced block conferidas uma a uma no re-fetch: abas `Apostilas`,
+  `Apostila PDF`, `Repositório visual`, `Questões & Anki` e `Automação` saíram;
+  ficaram **Anki · Mapa da prova · Cronograma · Motor · Arquivo**. No corpo, sem
+  clique: metas · Hoje · **Materiais da aula** (banco inline) · **Objetivos de
+  estudo** (view vinculada filtrada) · Hub de Controle · marcos/Domínio · Pontos
+  fracos · **Como o aprendizado consolida** (ciclo em 5 passos e as sugestões com
+  o porquê). `Como usar` reescrito para o fluxo novo.
+- **Código:** `src/materiais.js` (leitura, promoção idempotente, `objetivosDeEstudo`,
+  `sugestoesDeConsolidacao` com `LIMIARES` explícitos, `resumoDeConsolidacao`);
+  `lerTopicosHub` passou a ler os campos Anki ·; `cronograma` lê `Kit de estudo`
+  com fallback para `Apostila`; `promoverPedidos` virou pedido de kit;
+  Jarvis Code ganhou `/objetivos`, `/materiais`, `/consolidar` com intenções
+  ("o que a professora quer?", "chegou aula nova", "tá fixando?") e voz; CLI
+  `materiais [--aplicar]` e `materiais --objetivos [--dias N]`.
+- **Testes:** 302 asserções (127 + 175), todas passando na primeira execução.
+  Os novos cobrem ordem de atendimento, janela de objetivos, cada regra de
+  consolidação (inclusive "base insuficiente não é lida" e "2 dias ainda é
+  aceitável"), determinismo das sugestões e as intenções novas sem quebrar as
+  antigas ("que prova vem?" segue sendo agenda).
+- `diagnostico`: autenticação ok, **0/12** bancos — o bloqueio da seção 3 persiste.
+
 **Próxima sessão começa por:**
-1. **O compartilhamento.** `node index.js diagnostico` tem de dar `11/11`. Até
+1. **O compartilhamento.** `node index.js diagnostico` tem de dar `12/12`. Até
    lá, nenhum comando de escrita do código funciona — e é só isso que separa o
    sistema de estar no ar.
-2. `node index.js revisoes` (dry-run) → ler o diff → `--aplicar`.
-3. `node index.js promover` (dry-run) → `--aplicar`.
-4. `node index.js fila --aplicar` para exercitar o display ponta a ponta. É o
-   único caminho ainda não exercitado nem em lógica nem em rede: o append REST
-   dentro do synced block.
-5. Preencher as durações em `Compromissos` (sem elas os dias saem como
-   `indeterminado`) e resolver: hora do IESC II, dia do tutorial B4, subturma do
-   ECG, e cadastrar Atlética/Liga e treino físico.
-6. Primeira auditoria real para fechar o ciclo do item 3.
-7. Opcional, um clique seu na UI: "Card preview → None" nas duas galerias, que a
-   API não alcança.
+2. **Primeiro material real.** Breno cria a linha em `Materiais da Aula` (o
+   problema do T2 ou a próxima aula) com `Kit = 📥 Novo`; a rotina das 5h (ou
+   `Kit: <material>` no chat) gera o primeiro kit. Conferir: Objetivos e Sinais
+   preenchidos, cards na Fila Anki com `Formato` e `Material`, Hub com
+   `Status dos Flashcards = Na fila`.
+3. `node index.js materiais` (dry-run) → `--aplicar`, quando a integração enxergar.
+4. `node index.js revisoes` (dry-run) → `--aplicar`; `promover` idem.
+5. `node index.js fila --aplicar` para exercitar o display ponta a ponta.
+6. Preencher as durações em `Compromissos` e resolver: hora do IESC II, dia do
+   tutorial B4, subturma do ECG, Atlética/Liga e treino físico.
+7. Primeira auditoria real (Agente = Kit de estudo) para fechar o ciclo do item 3.
+8. Opcional, um clique na UI: "Card preview → None" nas duas galerias.

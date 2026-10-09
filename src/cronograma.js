@@ -54,7 +54,9 @@ async function lerCronograma(opcoes = {}) {
       horas: p['Horas'],
       status: {
         feito: p['Feito'] === true,
-        apostila: p['Apostila'],
+        // `Apostila` virou `Kit de estudo` em 2026-10-09 (sessão 6). O nome
+        // antigo fica como reserva para um banco que ainda não tenha migrado.
+        kit: p['Kit de estudo'] ?? p['Apostila'] ?? null,
         atrasado: p['Feito'] !== true && data ? data < dataHoje : false,
       },
       plano: {
@@ -66,7 +68,8 @@ async function lerCronograma(opcoes = {}) {
       eventosDoModulo: p['Eventos do módulo'],
       relacoes: {
         topicos: p['Tópicos'] || [],
-        apostilaDoDia: p['Apostila do dia'] || [],
+        materiaisDoDia: p['Materiais do dia'] || [],   // materiais da professora que o dia estuda
+        apostilaDoDia: p['Apostila do dia'] || [],     // legado (modelo de apostila, aposentado)
         compromissos: p['Compromissos'] || [],
       },
     };

@@ -16,8 +16,10 @@ const N = require('./notion');
 
 // ── Central de Comandos ───────────────────────────────────────────
 
+// Opções do select `Comando` da Central. "Gerar apostila" e "Mini-apostila de
+// correção" viraram "Kit de estudo" e "Mini-kit de correção" em 2026-10-09.
 const COMANDOS = Object.freeze([
-  'Gerar apostila', 'Mini-apostila de correção', 'Questões extras', 'Cards extras',
+  'Kit de estudo', 'Mini-kit de correção', 'Questões extras', 'Cards extras',
   'Tirar dúvida', 'Ajustar cronograma', 'Análise semanal', 'Outro',
 ]);
 const STATUS_PEDIDO = Object.freeze({
@@ -93,7 +95,9 @@ const TITULO_SECAO = '⟳ Diretrizes aprendidas (mantido pelo Jarvis)';
  */
 const TAXONOMIA = [
   { nome: 'prolixidade', teste: /long[ao]|extens[ao]|prolix|texto demais|muito texto|cansativ|verbos[ao]|arrastad|enrola/i,
-    diretriz: 'Cortar prosa: no máximo 8 linhas corridas por tópico. Preferir tabela, esquema e bullet a parágrafo.' },
+    diretriz: 'Cortar prosa: o resumo cabe em uma tela, com até 10 bullets e no máximo 8 linhas corridas. Preferir tabela, esquema e bullet a parágrafo.' },
+  { nome: 'sinais de prova', teste: /professora|sinal|enfatiz|cobra|objetivo/i,
+    diretriz: 'Preencher Sinais de prova com o que a professora enfatizou, repetiu ou disse que cai, e derivar os Objetivos de estudo daí — não do sumário do livro.' },
   { nome: 'falta de esquema', teste: /esquema|diagrama|fluxograma|fluxo|desenh|ilustra|visual|imagem/i,
     diretriz: 'Incluir ao menos um esquema ou fluxograma por tópico, com os passos do mecanismo numerados.' },
   { nome: 'falta de cálculo', teste: /c[áa]lculo|conta|f[óo]rmula|matem[áa]tic|num[ée]ric/i,
@@ -111,9 +115,9 @@ const TAXONOMIA = [
   { nome: 'embriologia ausente', teste: /embri/i,
     diretriz: 'Incluir a embriologia correlata: caem de 2 a 4 questões de embriologia em toda prova.' },
   { nome: 'formato', teste: /format|layout|organiza|estrutura|desorganiz|bagun[çc]|padr[ãa]o/i,
-    diretriz: 'Padronizar a estrutura de cada tópico: objetivo → mecanismo → esquema → pegadinhas → questões.' },
+    diretriz: 'Padronizar o kit: objetivos → pontos-chave → onde ler → pegadinhas → praticar no Anki. Nada de bateria no Notion.' },
   { nome: 'questões', teste: /quest[õo]es|simulado|bateria|exerc[íi]cio|prova/i,
-    diretriz: 'Cada tópico fecha com bateria no formato da prova: alternativas, somatória, assertivas I–IV e asserção-razão.' },
+    diretriz: 'Cada kit traz 6 a 10 exercícios no formato da prova (alternativas, somatória, assertivas I–IV, asserção-razão), na Fila Anki com Formato = Exercício e gabarito comentado no verso.' },
   { nome: 'SNA transversal', teste: /\bsna\b|aut[ôo]nom|adren|muscarin|simp[áa]tic/i,
     diretriz: 'Tratar o SNA como transversal: marcar α1, β1 e muscarínicos sempre que aparecerem em neuro, cardio e pressão arterial.' },
 ];

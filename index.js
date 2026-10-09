@@ -11,6 +11,7 @@
  *   src/cronograma.js   leitura do plano diário
  *   src/revisoes.js     reconciliação das revisões com o Hub
  *   src/agentes.js      fila de pedidos e loop de autoaperfeiçoamento
+ *   src/materiais.js    materiais da professora → kit de estudo; objetivos; consolidação
  *   src/code.js         Jarvis Code: conversa, fila e display no Hub
  */
 
@@ -21,6 +22,7 @@ const Compromissos = require('./src/compromissos');
 const Cronograma = require('./src/cronograma');
 const Revisoes = require('./src/revisoes');
 const Agentes = require('./src/agentes');
+const Materiais = require('./src/materiais');
 const Code = require('./src/code');
 
 const { IDS, http, notion } = N;
@@ -128,7 +130,7 @@ const COMANDOS_CLI = {
     for (const d of dias) {
       const marca = d.status.feito ? '✅' : d.status.atrasado ? '🔴' : '⬜';
       console.log(`${marca} ${d.data || '(sem data)'}  ${d.dia || ''}`);
-      if (d.horas) console.log(`     ${d.horas}h planejadas · ${d.semana || '—'} · apostila: ${d.status.apostila || '—'}`);
+      if (d.horas) console.log(`     ${d.horas}h planejadas · ${d.semana || '—'} · kit: ${d.status.kit || '—'}`);
       if (d.plano.ler) console.log(`     Ler: ${d.plano.ler}`);
       if (d.revisoesProgramadas) console.log(`     Revisões: ${d.revisoesProgramadas}`);
       if (d.capacidade) {
@@ -254,13 +256,51 @@ const COMANDOS_CLI = {
       console.log(`  ${a.detalhes}`);
       if (a.topicos.length) console.log(`  ${a.topicos.length} tópico(s) ligados`);
     }
-    if (!r.aPromover.length) console.log('(nenhum dia pedindo apostila)');
+    if (!r.aPromover.length) console.log('(nenhum dia pedindo kit)');
     if (aplicar && r.promovidos) {
       console.log(`\n✅ ${r.promovidos} promovido(s); os dias passaram a "${Code.GERANDO}".`);
       for (const x of r.resultados) console.log(`   ${x.pedidoUrl}`);
     }
     if (!aplicar && r.aPromover.length) {
       console.log('\nSimulação. Para gravar: node index.js promover --aplicar');
+    }
+    console.log('');
+  },
+
+  async materiais(args) {
+    const aplicar = args.includes('--aplicar');
+    if (args.includes('--objetivos')) {
+      const dias = Number(valorDe(args, '--dias')) || 7;
+      const lista = await Materiais.lerMateriais();
+      const o = Materiais.objetivosDeEstudo(lista, { dias });
+      console.log(`\n🎯 Objetivos de estudo · últimos ${dias} dias (desde ${o.desde})\n` + '─'.repeat(62));
+      for (const m of o.itens) {
+        console.log(`▸ ${m.material}${m.encontro ? ` · ${m.encontro}` : ''}${m.recebidoEm ? ` · ${m.recebidoEm}` : ''}`);
+        console.log(`  Objetivos: ${m.objetivos || '—'}`);
+        console.log(`  Sinais de prova: ${m.sinais || '—'}`);
+        console.log(`  Anki: ${m.baralho || '—'} · ${m.exercicios} exercício(s), ${m.flashcards} flashcard(s)`);
+      }
+      if (!o.itens.length) console.log('(nenhum kit pronto na janela)');
+      if (o.pendentes.length) console.log(`\n${o.pendentes.length} material(is) ainda sem kit.`);
+      console.log('');
+      return;
+    }
+
+    const r = await Materiais.promoverMateriais({ aplicar });
+    console.log(`\n🧩 Materiais da professora → kit ${aplicar ? '(APLICANDO)' : '(simulação)'}\n` + '─'.repeat(62));
+    console.log(`Materiais com Kit "${Materiais.KIT.novo}": ${r.novos}\n`);
+    for (const a of r.aPromover) {
+      console.log(`▸ ${a.recebidoEm || '—'} · ${a.tipo || '—'} → "${a.titulo}"`);
+      console.log(`  ${a.detalhes}`);
+      if (a.topicos.length) console.log(`  ${a.topicos.length} tópico(s) ligados`);
+    }
+    if (!r.aPromover.length) console.log('(nenhum material novo)');
+    if (aplicar && r.promovidos) {
+      console.log(`\n✅ ${r.promovidos} promovido(s); os materiais passaram a "${Materiais.KIT.gerando}".`);
+      for (const x of r.resultados) console.log(`   ${x.pedidoUrl}`);
+    }
+    if (!aplicar && r.aPromover.length) {
+      console.log('\nSimulação. Para gravar: node index.js materiais --aplicar');
     }
     console.log('');
   },
@@ -344,14 +384,24 @@ Jarvis · automação do Notion
   node index.js agente "<pedido>" "<comando>" ["<detalhes>"]
                                              Cria ou atualiza pedido na Central de Comandos
 
+  — Materiais da professora (o gatilho do estudo) —
+
+  node index.js materiais [--aplicar]        Todo material com Kit "📥 Novo" vira pedido
+      "Kit de estudo" na Central de Comandos (resumo + exercícios + flashcards).
+      Sem --aplicar é simulação
+  node index.js materiais --objetivos [--dias N]
+                                             Objetivos de estudo e sinais de prova dos
+      kits prontos na janela: o resumo que guia a notificação
+
   — Jarvis Code —
 
-  node index.js promover [--aplicar]         Promove "📥 Pedir" do Cronograma a
-      pedido formal na Central de Comandos, que passa a ser a única fila
+  node index.js promover [--aplicar]         Promove "📥 Pedir" do Cronograma a pedido
+      de kit na Central de Comandos (dia sem material da professora)
 
   node index.js jarvis "<pergunta>" [--aplicar]
                                              Conversa com o Jarvis Code. Escreva solto,
-      sem barra: "o que eu faço hoje?", "tenho tempo quinta?", "como tá o F04?".
+      sem barra: "o que eu faço hoje?", "o que a professora quer?", "tá fixando?",
+      "tenho tempo quinta?", "como tá o F04?".
       Com --aplicar, injeta a resposta no display do Hub.
       Comandos explícitos também funcionam:
       ${Object.values(Code.COMANDOS_CODE).map((c) => c.uso).join(' · ')}
@@ -399,12 +449,20 @@ module.exports = {
   lerCompromissos: Compromissos.lerCompromissos,
   lerTopicosHub: Revisoes.lerTopicosHub,
   lerAuditoria: Agentes.lerAuditoria,
+  lerMateriais: Materiais.lerMateriais,
   // escrita
   gerenciarAgente: Agentes.gerenciarAgente,
   buscarPedido: Agentes.buscarPedido,
   reconciliarRevisoes: Revisoes.reconciliarRevisoes,
   otimizarAgentes: Agentes.otimizarAgentes,
   injetarDiretrizes: Agentes.injetarDiretrizes,
+  promoverMateriais: Materiais.promoverMateriais,
+  // materiais → objetivos e consolidação (puro)
+  KIT: Materiais.KIT, COMANDO_KIT: Materiais.COMANDO_KIT, LIMIARES: Materiais.LIMIARES,
+  objetivosDeEstudo: Materiais.objetivosDeEstudo,
+  sugestoesDeConsolidacao: Materiais.sugestoesDeConsolidacao,
+  resumoDeConsolidacao: Materiais.resumoDeConsolidacao,
+  tituloPedidoDoMaterial: Materiais.tituloPedidoDoMaterial,
   // Code
   COMANDOS_CODE: Code.COMANDOS_CODE,
   interpretar: Code.interpretar,
@@ -428,5 +486,5 @@ module.exports = {
   sintetizarDiretriz: Agentes.sintetizarDiretriz,
   TAXONOMIA: Agentes.TAXONOMIA,
   // submódulos
-  N, Compromissos, Cronograma, Revisoes, Agentes, Code,
+  N, Compromissos, Cronograma, Revisoes, Agentes, Materiais, Code,
 };

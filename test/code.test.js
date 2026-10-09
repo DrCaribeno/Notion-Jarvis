@@ -41,33 +41,66 @@ const COMPROMISSOS = [
 const DIAS = [
   { id: 'd1', url: 'u/d1', dia: 'Seg 12/10 — Embriologia do SN', data: '2026-10-12',
     semana: 'S2 · Neuro total', horas: 7,
-    status: { feito: false, apostila: '📥 Pedir', atrasado: false },
+    status: { feito: false, kit: '📥 Pedir', atrasado: false },
     plano: { ler: 'Guyton cap. 5', esquematizar: 'Placas alar e basal', exercicio: '10 questões' },
     revisoesProgramadas: '⟳ derivado do Hub · R1: F04, F05',
-    eventosDoModulo: 'Feriado', relacoes: { topicos: ['t1', 't2'], apostilaDoDia: [], compromissos: [] } },
+    eventosDoModulo: 'Feriado',
+    relacoes: { topicos: ['t1', 't2'], materiaisDoDia: ['m1'], apostilaDoDia: [], compromissos: [] } },
   { id: 'd2', url: 'u/d2', dia: 'Qui 01/10 — atrasado', data: '2026-10-01',
     semana: 'S1 · Fundação biofísica', horas: 4,
-    status: { feito: false, apostila: null, atrasado: true },
+    status: { feito: false, kit: null, atrasado: true },
     plano: { ler: 'Guyton cap. 1', esquematizar: null, exercicio: null },
     revisoesProgramadas: null, eventosDoModulo: null,
-    relacoes: { topicos: [], apostilaDoDia: [], compromissos: [] } },
+    relacoes: { topicos: [], materiaisDoDia: [], apostilaDoDia: [], compromissos: [] } },
   { id: 'd3', url: 'u/d3', dia: 'Ter 13/10', data: '2026-10-13', semana: 'S2 · Neuro total', horas: 5,
-    status: { feito: false, apostila: '📥 Pedir', atrasado: false },
+    status: { feito: false, kit: '📥 Pedir', atrasado: false },
     plano: { ler: 'Guyton cap. 6', esquematizar: null, exercicio: null },
     revisoesProgramadas: null, eventosDoModulo: null,
-    relacoes: { topicos: ['t3'], apostilaDoDia: [], compromissos: [] } },
+    relacoes: { topicos: ['t3'], materiaisDoDia: [], apostilaDoDia: [], compromissos: [] } },
 ];
+
+/** Métricas Anki · como o sincronizar_anki.ps1 grava no Hub (sessão 6). */
+const ANKI_VAZIO = { cards: null, vistos: null, consolidados: null, lapsos: null, revisoes: null,
+  retencao: null, questoesFeitas: null, questoesCertas: null, ultimaRevisao: null, atualizadoEm: null };
 
 const TOPICOS = [
   { id: 't1', url: 'u/t1', idHumano: 'F04', topico: 'Potencial de ação', sistema: 'Fundamentos',
     status: 'Em estudo', risco: 'Crítico', dataReal: null, dataAlvo: '2026-10-12',
-    dataProva: '2026-10-26', formulas: {} },
+    dataProva: '2026-10-26', formulas: {},
+    // Retenção baixa com base suficiente: pede revisão antes de matéria nova.
+    anki: { ...ANKI_VAZIO, cards: 20, vistos: 20, consolidados: 2, lapsos: 1, revisoes: 12, retencao: 0.6,
+      atualizadoEm: N.hoje() } },
   { id: 't2', url: 'u/t2', idHumano: 'F05', topico: 'Propagação do potencial', sistema: 'Fundamentos',
     status: 'Reforço', risco: 'Crítico', dataReal: null, dataAlvo: '2026-10-12',
-    dataProva: '2026-10-26', formulas: {} },
+    dataProva: '2026-10-26', formulas: {},
+    // Consolidado: metade com intervalo ≥ 14 d e retenção boa.
+    anki: { ...ANKI_VAZIO, cards: 10, vistos: 10, consolidados: 6, lapsos: 0, revisoes: 20, retencao: 0.9,
+      atualizadoEm: N.hoje() } },
   { id: 't3', url: 'u/t3', idHumano: 'K09', topico: 'Equilíbrio ácido-base', sistema: 'Renal',
     status: 'Não iniciado', risco: 'Crítico', dataReal: null, dataAlvo: '2026-11-06',
-    dataProva: '2026-11-09', formulas: {} },
+    dataProva: '2026-11-09', formulas: {}, anki: { ...ANKI_VAZIO } },
+];
+
+const HOJE = N.hoje();
+const MATERIAIS = [
+  { id: 'm1', url: 'u/m1', material: 'Aula 3 · Vias somatossensoriais', tipo: 'Aula',
+    recebidoEm: N.somarDias(HOJE, -1), encontro: 'Conf. 2', topicos: ['t1'], link: null,
+    kit: '✅ Pronto', objetivos: 'Explicar os três neurônios da via; localizar lesão por dermátomo.',
+    sinais: 'Repetiu Brown-Séquard duas vezes; disse que cai AVC talâmico.',
+    exercicios: 8, flashcards: 14, baralho: 'MED 1.5 › 2 Neuro › N03',
+    processadoEm: HOJE, errosNoKit: null, pedidos: ['p1'] },
+  { id: 'm2', url: 'u/m2', material: 'Problema do T2', tipo: 'Problema do tutorial',
+    recebidoEm: HOJE, encontro: 'T2', topicos: ['t1', 't2'], link: null,
+    kit: '📥 Novo', objetivos: null, sinais: null, exercicios: null, flashcards: null, baralho: null,
+    processadoEm: null, errosNoKit: null, pedidos: [] },
+  { id: 'm3', url: 'u/m3', material: 'Slides da Conf. 1', tipo: 'Slides',
+    recebidoEm: N.somarDias(HOJE, -3), encontro: 'Conf. 1', topicos: ['t3'], link: 'https://x',
+    kit: '↩️ Preciso de info', objetivos: 'Qual tópico?', sinais: null, exercicios: null, flashcards: null,
+    baralho: null, processadoEm: null, errosNoKit: null, pedidos: [] },
+  { id: 'm4', url: 'u/m4', material: 'Aula antiga', tipo: 'Aula',
+    recebidoEm: N.somarDias(HOJE, -30), encontro: 'Conf. 0', topicos: [], link: null,
+    kit: '✅ Pronto', objetivos: 'Velho', sinais: null, exercicios: 6, flashcards: 10, baralho: 'X',
+    processadoEm: N.somarDias(HOJE, -30), errosNoKit: null, pedidos: [] },
 ];
 
 /** Dublê fiel: honra os filtros e calcula capacidade com o módulo real. */
@@ -89,6 +122,11 @@ const FONTES = {
   },
   async lerCompromissos() { return COMPROMISSOS; },
   async lerTopicosHub() { return TOPICOS; },
+  async lerMateriais(opcoes = {}) {
+    let lista = MATERIAIS.slice();
+    if (opcoes.kit) lista = lista.filter((m) => m.kit === opcoes.kit);
+    return lista;
+  },
 };
 
 const textos = (resposta) => (resposta.blocos || []).map((b) => b.texto).join(' | ');
@@ -137,7 +175,9 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
   ok(hoje.titulo.includes('2026-10-12'), 'hoje no título', hoje.titulo);
   ok(textos(hoje).includes('Guyton cap. 5'), 'hoje traz a leitura do dia');
   ok(textos(hoje).includes('Placas alar'), 'hoje traz o que esquematizar');
-  ok(textos(hoje).includes('📥 Pedir'), 'hoje mostra o estado da apostila');
+  ok(textos(hoje).includes('Kit de estudo — 📥 Pedir'), 'hoje mostra o estado do kit (não "apostila")');
+  ok(!textos(hoje).toLowerCase().includes('apostila'), 'hoje não fala mais em apostila');
+  ok(textos(hoje).includes('Materiais da aula — 1'), 'hoje conta os materiais da professora ligados ao dia');
   ok(textos(hoje).includes('sobrecarregado'), 'hoje cruza capacidade: 7h num dia com 5,5h tomadas');
   ok(textos(hoje).includes('⬜'), 'hoje diz que não está feito');
 
@@ -253,6 +293,10 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
     'dias diferentes geram títulos diferentes');
   eq(Code.PEDIR, '📥 Pedir', 'estado de entrada bate com o schema do Cronograma');
   eq(Code.GERANDO, '⏳ Gerando', 'estado de saída bate com o schema do Cronograma');
+  eq(Code.CAMPO_KIT, 'Kit de estudo', 'o campo gravado no Cronograma é o renomeado (era Apostila)');
+  ok(t1.startsWith('Kit de estudo do dia'), 'o pedido do dia é um kit, não uma apostila', t1);
+  ok(J.COMANDOS.includes(J.COMANDO_KIT), 'o comando do kit existe no select da Central');
+  ok(!J.COMANDOS.includes('Gerar apostila'), '"Gerar apostila" saiu do select da Central');
 
 
   // ── G. Conversa casual ──────────────────────────────────────────
@@ -272,6 +316,18 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
   eq(conv('e amanha?').comando, 'hoje', 'frase só com data cai no plano do dia');
   eq(conv('faz um cafe pra mim').reconhecido, false, 'pedido fora de escopo não é reconhecido');
   eq(conv('me explica a vida').reconhecido, false, 'conversa fora de escopo também não');
+  // Sessão 6: o material da professora, os objetivos e a consolidação.
+  eq(conv('o que a professora quer?').comando, 'objetivos', 'pergunta sobre a professora → objetivos');
+  eq(conv('o que cai na prova?').comando, 'objetivos', '"o que cai" → objetivos (não agenda)');
+  eq(conv('o que eu preciso saber?').comando, 'objetivos', 'pergunta sobre o que saber → objetivos');
+  eq(conv('chegou aula nova, tem kit?').comando, 'materiais', 'material novo → materiais');
+  eq(conv('o que ta sem kit?').comando, 'materiais', '"sem kit" → materiais');
+  eq(conv('ta fixando?').comando, 'consolidar', 'fixação → consolidar');
+  eq(conv('como ta minha retencao no anki?').comando, 'consolidar', 'retenção/anki → consolidar');
+  eq(conv('o que consolidar hoje?').comando, 'consolidar', 'consolidar vence "hoje"');
+  eq(conv('que prova vem?').comando, 'agenda', 'e "que prova vem" continua sendo agenda');
+  eq(conv('/consolidar N03').argumentos, ['N03'], 'consolidar com ID preserva a caixa');
+  eq(conv('/objetivos 14').argumentos, ['14'], 'objetivos aceita janela em dias');
 
   grupo('H. Code · extração de ID e data da frase inteira');
   eq(Code.extrairIdTopico('como ta o F04?'), 'F04', 'ID no meio da frase');
@@ -329,6 +385,53 @@ eq(Code.dataDosArgumentos(['xpto'], '2026-10-08'), '2026-10-08', 'argumento inú
   const vozQuebrada = await Code.executar('/fracos', FONTES);
   ok(Array.isArray(vozQuebrada.blocos), 'resposta segue válida');
   ok(vozDe(vozQuebrada).length <= 1, 'no máximo uma linha de voz');
+
+  // ── L. Materiais da professora, objetivos e consolidação ───────
+  grupo('L. Code · objetivos, materiais e consolidar (sessão 6)');
+  const obj = await Code.HANDLERS.objetivos([], FONTES);
+  ok(obj.titulo.includes('7 dias'), 'objetivos usa janela padrão de 7 dias', obj.titulo);
+  ok(textos(obj).includes('Vias somatossensoriais'), 'objetivos lista o kit pronto recente');
+  ok(textos(obj).includes('Brown-Séquard'), 'objetivos traz os sinais de prova da professora');
+  ok(textos(obj).includes('N03'), 'objetivos aponta o baralho do Anki');
+  ok(!textos(obj).includes('Aula antiga'), 'kit pronto há 30 dias fica fora da janela de 7');
+  ok(textos(obj).includes('2 material(is) ainda sem kit'), 'objetivos conta os pendentes (Novo + Preciso de info)');
+  eq(obj.fatos, { n: 1, pendentes: 2 }, 'fatos de objetivos');
+
+  const obj30 = await Code.HANDLERS.objetivos(['30'], FONTES);
+  ok(textos(obj30).includes('Aula antiga'), 'janela de 30 dias inclui o kit antigo');
+
+  const mats = await Code.HANDLERS.materiais([], FONTES);
+  eq(mats.fatos.n, 2, 'materiais conta só os sem kit');
+  const posProblema = textos(mats).indexOf('Problema do T2'), posSlides = textos(mats).indexOf('Slides');
+  ok(posProblema < posSlides, 'problema do tutorial vem antes dos slides, mesmo chegando depois');
+  ok(dados(mats).some((b) => b.cor === 'orange'), 'Preciso de info é destacado');
+
+  const cons = await Code.HANDLERS.consolidar([], FONTES);
+  ok(textos(cons).includes('2 tópico(s) com cards'), 'consolidar conta tópicos com cards', textos(cons));
+  ok(textos(cons).includes('1 ainda sem cards'), 'e os sem cards');
+  ok(textos(cons).includes('F04') && textos(cons).includes('60%'), 'F04 aparece com retenção de 60%');
+  ok(textos(cons).includes('F05') && textos(cons).includes('Fixou'), 'F05 aparece como consolidado');
+  ok(textos(cons).includes('Limiares'), 'consolidar declara os limiares');
+  eq(cons.fatos.urgentes, 1, 'uma sugestão urgente (retenção baixa de F04)');
+
+  const consF04 = await Code.HANDLERS.consolidar(['F04'], FONTES);
+  ok(textos(consF04).includes('20 cards'), 'consolidar por ID mostra as métricas cruas');
+  ok(textos(consF04).includes('Revise o baralho hoje'), 'e a sugestão correspondente');
+  const consZ = await Code.HANDLERS.consolidar(['Z99'], FONTES);
+  ok(textos(consZ).includes('Nenhum tópico'), 'ID inexistente responde direito');
+
+  const vozObj = await Code.executar('o que a professora quer?', FONTES);
+  eq(vozDe(vozObj).length, 1, 'objetivos tem voz');
+  ok(vozDe(vozObj)[0].texto.includes('Sinais de prova'), 'e a voz aponta para os sinais de prova');
+  const vozCons = await Code.executar('ta fixando?', FONTES);
+  ok(vozDe(vozCons)[0].texto.includes('1 tópico(s) pedem revisão'), 'a voz de consolidar nomeia o urgente', vozDe(vozCons)[0].texto);
+
+  const semSync = await Code.executar('/consolidar', {
+    ...FONTES,
+    lerTopicosHub: async () => TOPICOS.map((t) => ({ ...t, anki: { ...t.anki, atualizadoEm: '2026-01-01' } })),
+  });
+  ok(vozDe(semSync)[0].texto.includes('não sincroniza'), 'sem sincronização recente a voz avisa que o placar é velho');
+  ok(textos(semSync).includes('sem sincronizar'), 'e o resumo conta os tópicos sem sincronizar');
 
   // ── Resultado ───────────────────────────────────────────────────
   console.log('\n' + '─'.repeat(62));

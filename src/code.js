@@ -31,6 +31,7 @@ const Compromissos = require('./compromissos');
 const Cronograma = require('./cronograma');
 const Revisoes = require('./revisoes');
 const Agentes = require('./agentes');
+const Materiais = require('./materiais');
 
 // ── Gramática ─────────────────────────────────────────────────────
 
@@ -43,6 +44,9 @@ const COMANDOS_CODE = {
   pendentes:  { uso: '/pendentes',         descricao: 'Dias atrasados do cronograma' },
   fracos:     { uso: '/fracos',            descricao: 'Tópicos em Reforço ou abaixo de 70%' },
   agenda:     { uso: '/agenda [data]',     descricao: 'Compromissos do dia' },
+  objetivos:  { uso: '/objetivos [dias]',  descricao: 'O que a professora quer: objetivos e sinais de prova dos materiais recentes' },
+  materiais:  { uso: '/materiais',         descricao: 'Materiais da professora ainda sem kit' },
+  consolidar: { uso: '/consolidar [ID]',   descricao: 'Como o aprendizado está consolidando, lido no Anki' },
   ajuda:      { uso: '/ajuda',             descricao: 'Esta lista' },
 };
 
@@ -56,6 +60,12 @@ const COMANDOS_CODE = {
 const INTENCOES = [
   { comando: 'ajuda', teste: /\bajuda|socorro|help|o que (voce|vc|tu) (faz|sabe|pode)|quais.*(comando|op[cç]|coisa)|como (te )?(uso|usar|falo)\b/ },
   { comando: 'pendentes', teste: /\batrasad|pendente|atraso|devendo|deixei (pra|para) tr[aá]s|fiquei para tr[aá]s|em d[ií]vida|nao fiz|ficou para tr[aá]s\b/ },
+  // Materiais da professora sem kit: "chegou material", "o que tá sem kit".
+  { comando: 'materiais', teste: /\bmateria(l|is)\b|sem kit|kit pendente|chegou (aula|slide|conferencia|problema)|a (prof|professora) (mandou|enviou)/ },
+  // Objetivos de estudo e sinais de prova: "o que a professora quer", "o que cai".
+  { comando: 'objetivos', teste: /\bobjetivo|professora|o que cai|sina(l|is) de prova|o que (eu )?(preciso|tenho que|devo) (saber|estudar|aprender)|o que ela (quer|cobra|enfatiz)/ },
+  // Consolidação, lida no Anki: "tá fixando?", "retenção", "o que consolidar".
+  { comando: 'consolidar', teste: /consolid|\banki\b|reten[cç]|memoriz|fixa(r|ndo|ou)|esquec|lapso|decor(ar|ei)/ },
   { comando: 'fracos', teste: /\bfraco|fraqueza|refor[cç]o|pior|ruim|mal\b|dificuldade|travad|empacad|nao entr[ao]|onde (eu )?err/ },
   { comando: 'revisoes', teste: /\brevis|\br1\b|\br2\b|\br3\b|pre.?prova|relembr|rever\b/ },
   { comando: 'capacidade', teste: /\btempo|livre|cabe\b|aguent|capacidade|sobra|quantas horas|consigo (estudar|encaixar)|d[aá] tempo|folga\b/ },
@@ -219,7 +229,7 @@ const ICONE_VEREDITO = { 'viável': '🟢', sobrecarregado: '🟠', indeterminad
 const escolher = (opcoes, semente) => opcoes[Math.abs(Number(semente) || 0) % opcoes.length];
 
 const voz = {
-  hoje({ veredito, excesso, feito, apostila, horas }) {
+  hoje({ veredito, excesso, feito, kit, horas }) {
     if (feito) return escolher([
       'Dia marcado como feito. Anotado, e com certo orgulho.',
       'Feito. Permita-me registrar que isto está virando hábito.',
@@ -232,7 +242,7 @@ const voz = {
       return 'Não consigo fechar a conta: há compromisso sem duração informada. '
         + 'Prefiro dizer que não sei a lhe dar um número bonito e errado.';
     }
-    if (apostila === '📥 Pedir') return 'A apostila do dia está pedida. Entra na próxima rotina das 5h.';
+    if (kit === '📥 Pedir') return 'O kit do dia está pedido. Entra na próxima rotina das 5h.';
     return escolher([
       'Dia viável. Sugiro começar antes que ele deixe de ser.',
       'Cabe. Recomendo aproveitar a folga enquanto ela existe.',
@@ -288,6 +298,26 @@ const voz = {
     }
     return null;
   },
+
+  objetivos({ n, pendentes }) {
+    if (n === 0 && pendentes === 0) return 'Nenhum material da professora ainda. Quando chegar, o estudo começa por ele.';
+    if (n === 0) return `${pendentes} material(is) esperando kit. Os objetivos aparecem quando a rotina das 5h passar.`;
+    if (pendentes) return `${n} kit(s) prontos e ${pendentes} na fila. O que ela enfatiza está em Sinais de prova — leia antes do livro.`;
+    return 'Tudo o que ela mandou já virou kit. O retrato do que cai está se formando nos Sinais de prova.';
+  },
+
+  materiais({ n }) {
+    if (n === 0) return 'Nenhum material sem kit. A professora manda, eu transformo; por ora, estamos quites.';
+    if (n === 1) return 'Um material esperando kit. Entra na próxima rotina das 5h, ou agora, se pedir.';
+    return `${n} materiais esperando kit. Problema de tutorial vai primeiro; o resto, na ordem em que chegou.`;
+  },
+
+  consolidar({ n, semSincronizar, semCards, urgentes }) {
+    if (semSincronizar) return 'O Anki não sincroniza há mais de dois dias. Sem isso, estou lendo um placar velho.';
+    if (n === 0 && semCards) return 'Nenhum tópico com cards no Anki ainda. O primeiro kit muda isso.';
+    if (urgentes) return `${urgentes} tópico(s) pedem revisão antes de matéria nova. Memória é como dívida: juros compostos.`;
+    return 'Nada urgente. O que foi visto está se fixando no ritmo esperado.';
+  },
 };
 
 /** Monta a linha da voz, se houver algo que valha dizer. */
@@ -309,6 +339,7 @@ const FONTES_PADRAO = {
   lerCronograma: Cronograma.lerCronograma,
   lerCompromissos: Compromissos.lerCompromissos,
   lerTopicosHub: Revisoes.lerTopicosHub,
+  lerMateriais: Materiais.lerMateriais,
 };
 
 const HANDLERS = {
@@ -347,13 +378,16 @@ const HANDLERS = {
     if (d.plano.esquematizar) blocos.push(r.b(`Esquematizar — ${d.plano.esquematizar}`));
     if (d.plano.exercicio) blocos.push(r.b(`Exercício — ${d.plano.exercicio}`));
     if (d.revisoesProgramadas) blocos.push(r.b(`Revisões — ${d.revisoesProgramadas}`));
-    if (d.status.apostila) blocos.push(r.b(`Apostila — ${d.status.apostila}`));
+    if (d.relacoes.materiaisDoDia.length) {
+      blocos.push(r.b(`Materiais da aula — ${d.relacoes.materiaisDoDia.length} ligado(s) a este dia`));
+    }
+    if (d.status.kit) blocos.push(r.b(`Kit de estudo — ${d.status.kit}`));
     blocos.push(r.p(d.status.feito ? '✅ Marcado como feito.' : '⬜ Ainda não marcado como feito.'));
     return {
       titulo: `Plano de ${data}`, blocos,
       fatos: {
         veredito: d.capacidade?.veredito, excesso: d.capacidade?.excesso || 0,
-        feito: d.status.feito, apostila: d.status.apostila, horas: d.horas || 0,
+        feito: d.status.feito, kit: d.status.kit, horas: d.horas || 0,
       },
     };
   },
@@ -489,6 +523,101 @@ const HANDLERS = {
       fatos: { n: soma.blocos.length, horas: soma.horas, confiavel: soma.confiavel },
     };
   },
+
+  /**
+   * O que a professora quer: objetivos e sinais de prova dos materiais já
+   * processados na janela recente. É o mesmo resumo que vai na notificação.
+   */
+  async objetivos(argumentos, fontes) {
+    const dias = Number(argumentos.find((a) => /^\d{1,3}$/.test(String(a)))) || 7;
+    const materiais = await fontes.lerMateriais();
+    const r0 = Materiais.objetivosDeEstudo(materiais, { dias });
+    const blocos = [];
+    if (!r0.itens.length) {
+      blocos.push(r.p(`Nenhum kit pronto nos últimos ${dias} dias.`));
+    }
+    for (const m of r0.itens) {
+      blocos.push(r.h(`${m.material}${m.encontro ? ` · ${m.encontro}` : ''}${m.recebidoEm ? ` · ${m.recebidoEm}` : ''}`));
+      blocos.push(r.b(`Objetivos — ${m.objetivos || 'ainda não preenchidos'}`));
+      blocos.push(r.b(`Sinais de prova — ${m.sinais || 'sem sinal registrado'}`, m.sinais ? 'red' : undefined));
+      blocos.push(r.b(`Anki — ${m.baralho || 'baralho não informado'} · ${m.exercicios} exercício(s), ${m.flashcards} flashcard(s)`));
+    }
+    if (r0.pendentes.length) {
+      blocos.push(r.p(`${r0.pendentes.length} material(is) ainda sem kit: ` +
+        r0.pendentes.map((p) => `${p.material} (${p.kit})`).join(', '), 'gray'));
+    }
+    return {
+      titulo: `Objetivos de estudo · últimos ${dias} dias`, blocos,
+      fatos: { n: r0.itens.length, pendentes: r0.pendentes.length },
+    };
+  },
+
+  /** Materiais da professora que ainda não viraram kit, na ordem de atendimento. */
+  async materiais(argumentos, fontes) {
+    const todos = await fontes.lerMateriais();
+    const pendentes = Materiais.ordenarParaAtendimento(todos.filter((m) => m.kit && m.kit !== Materiais.KIT.pronto));
+    if (!pendentes.length) {
+      return { titulo: 'Materiais sem kit', blocos: [r.p('✅ Todo material recebido já tem kit.')], fatos: { n: 0 } };
+    }
+    return {
+      titulo: `Materiais sem kit (${pendentes.length})`,
+      blocos: pendentes.map((m) => r.b(
+        `${m.kit} ${m.material}${m.tipo ? ` · ${m.tipo}` : ''}${m.encontro ? ` · ${m.encontro}` : ''}` +
+        `${m.recebidoEm ? ` · recebido ${m.recebidoEm}` : ''}`,
+        m.kit === Materiais.KIT.precisoInfo ? 'orange' : undefined,
+      )),
+      fatos: { n: pendentes.length },
+    };
+  },
+
+  /** Como o aprendizado está consolidando, lido nos campos Anki · do Hub. */
+  async consolidar(argumentos, fontes) {
+    const alvo = (argumentos[0] || '').toUpperCase();
+    const topicos = await fontes.lerTopicosHub();
+    const hoje = N.hoje();
+
+    if (alvo && !/^\d+$/.test(alvo)) {
+      const t = topicos.find((x) => String(x.idHumano || '').toUpperCase() === alvo);
+      if (!t) return { titulo: `Consolidação de ${alvo}`, blocos: [r.p(`Nenhum tópico com ID "${alvo}".`)] };
+      const sug = Materiais.sugestoesDeConsolidacao(t, { hoje });
+      const a = t.anki || {};
+      const blocos = [
+        r.h(`${t.idHumano} · ${t.topico || ''}`),
+        r.b(`Anki — ${a.cards ?? 0} cards · ${a.vistos ?? 0} vistos · ${a.consolidados ?? 0} consolidados · ` +
+          `${a.lapsos ?? 0} lapsos · retenção ${typeof a.retencao === 'number' ? `${Math.round(a.retencao * 100)}%` : '—'}` +
+          `${a.atualizadoEm ? ` · sincronizado ${a.atualizadoEm}` : ' · nunca sincronizado'}`),
+        ...sug.map((s) => r.b(s.texto, s.prioridade === 1 ? 'red' : s.prioridade === 4 ? 'green' : undefined)),
+      ];
+      return {
+        titulo: `Consolidação de ${alvo}`, blocos,
+        fatos: { n: 1, semSincronizar: sug.some((s) => s.regra === 'sem sincronizar') ? 1 : 0,
+          semCards: 0, urgentes: sug.filter((s) => s.prioridade === 1 && s.regra !== 'sem sincronizar').length },
+      };
+    }
+
+    const resumo = Materiais.resumoDeConsolidacao(topicos, { hoje });
+    const blocos = [
+      r.p(`${resumo.topicosComCards} tópico(s) com cards no Anki · ${resumo.semCards} ainda sem cards` +
+        (resumo.semSincronizar ? ` · ${resumo.semSincronizar} sem sincronizar há mais de ${Materiais.LIMIARES.diasSemSincronizar} dias` : '')),
+    ];
+    if (!resumo.sugestoes.length && resumo.topicosComCards) blocos.push(r.p('Nada urgente a consolidar.'));
+    for (const s of resumo.sugestoes) {
+      blocos.push(r.b(s.texto, s.prioridade === 1 ? 'red' : s.prioridade === 4 ? 'green' : undefined));
+    }
+    if (resumo.totalSugestoes > resumo.sugestoes.length) {
+      blocos.push(r.p(`… e mais ${resumo.totalSugestoes - resumo.sugestoes.length} sugestão(ões). Pergunte por um tópico: /consolidar N03.`, 'gray'));
+    }
+    blocos.push(r.p(`Limiares: retenção ≥ ${Math.round(Materiais.LIMIARES.retencaoMinima * 100)}%, ` +
+      `cobertura ≥ ${Math.round(Materiais.LIMIARES.coberturaMinima * 100)}%, consolidação (≥ 14 d) ≥ ` +
+      `${Math.round(Materiais.LIMIARES.consolidacaoBoa * 100)}%, lapsos < ${Materiais.LIMIARES.lapsosAltos}.`, 'gray'));
+    return {
+      titulo: 'Consolidação · lida no Anki', blocos,
+      fatos: {
+        n: resumo.topicosComCards, semSincronizar: resumo.semSincronizar, semCards: resumo.semCards,
+        urgentes: resumo.sugestoes.filter((s) => s.prioridade === 1).length,
+      },
+    };
+  },
 };
 
 /**
@@ -497,9 +626,9 @@ const HANDLERS = {
  */
 const SOCIAL = [
   { teste: /\b(quem (e|sou|voce|vc|tu)|seu nome|o que voce e|o que vc e|voce e o que)\b/,
-    resposta: 'Jarvis Code. Leio seu Cronograma, seus Compromissos e o Hub de Controle, e respondo '
-      + 'sobre eles. Não tenho opinião sobre fisiologia e não invento dado que não esteja lá — '
-      + 'o que, no meu ramo, conta como virtude.' },
+    resposta: 'Jarvis Code. Leio seu Cronograma, seus Compromissos, o Hub de Controle, os Materiais da Aula '
+      + 'e o que o Anki manda para o Hub, e respondo sobre eles. Não tenho opinião sobre fisiologia e não '
+      + 'invento dado que não esteja lá — o que, no meu ramo, conta como virtude.' },
   { teste: /\b(tchau|ate logo|ate mais|falou|flw|bye)\b/,
     resposta: 'Até. Estarei aqui, que é literalmente tudo o que eu faço.' },
   // Sem \b no fim: `obrigad` é prefixo de propósito (obrigado/obrigada/obrigadão).
@@ -512,7 +641,7 @@ const SOCIAL = [
     resposta: 'Operacional. O senhor é a variável interessante aqui — quer o plano de hoje?' },
   { teste: /^(oi|ola|eai|e ai|opa|fala|hey|hi|bom dia|boa tarde|boa noite)\b/,
     resposta: 'Pois não. Pergunte o que quiser do módulo: o que tem hoje, se o dia aguenta o plano, '
-      + 'como está um tópico, o que ficou atrasado.' },
+      + 'o que a professora quer, como está um tópico, o que ficou atrasado.' },
 ];
 
 /**
@@ -666,20 +795,25 @@ async function injetarNoDisplay(resposta, { displayId, marcaTempo } = {}) {
 
 const PEDIR = '📥 Pedir';
 const GERANDO = '⏳ Gerando';
+/** Nome da propriedade no Cronograma. Era `Apostila` até 2026-10-09. */
+const CAMPO_KIT = 'Kit de estudo';
 
 /** Título determinístico — é a chave de idempotência do pedido (ADR-003). */
-const tituloPedidoDoDia = (dia) => `Apostila do dia · ${dia.data}${dia.dia ? ` (${dia.dia})` : ''}`;
+const tituloPedidoDoDia = (dia) => `Kit de estudo do dia · ${dia.data}${dia.dia ? ` (${dia.dia})` : ''}`;
 
 /**
  * Promove todo dia marcado `📥 Pedir` a um pedido formal na Central de Comandos
  * e move o dia para `⏳ Gerando`, para não ser promovido duas vezes.
  *
  * Fecha a pendência 3: havia dois caminhos para o mesmo trabalho e nada ligava
- * um ao outro. Agora a Central de Comandos é a única fila.
+ * um ao outro. Agora a Central de Comandos é a única fila. Desde a sessão 6 o
+ * pedido é um **Kit de estudo** (resumo + exercícios + flashcards), não uma
+ * apostila; o caminho principal passou a ser `Materiais.promoverMateriais`,
+ * e este fica para o dia sem material da professora.
  */
 async function promoverPedidos({ aplicar = false, registrarNoDiario = true } = {}) {
   const dias = await Cronograma.lerCronograma({});
-  const aPromover = dias.filter((d) => d.status.apostila === PEDIR);
+  const aPromover = dias.filter((d) => d.status.kit === PEDIR);
 
   const acoes = aPromover.map((d) => ({
     diaId: d.id,
@@ -689,7 +823,7 @@ async function promoverPedidos({ aplicar = false, registrarNoDiario = true } = {
       d.plano.ler && `Ler: ${d.plano.ler}`,
       d.plano.esquematizar && `Esquematizar: ${d.plano.esquematizar}`,
       d.plano.exercicio && `Exercício: ${d.plano.exercicio}`,
-    ].filter(Boolean).join(' · ') || 'Apostila do dia pedida pelo Cronograma.',
+    ].filter(Boolean).join(' · ') || 'Kit do dia pedido pelo Cronograma, sem material da professora.',
     topicos: d.relacoes.topicos,
   }));
 
@@ -699,14 +833,14 @@ async function promoverPedidos({ aplicar = false, registrarNoDiario = true } = {
     for (const a of acoes) {
       const pedido = await Agentes.gerenciarAgente({
         pedido: a.titulo,
-        comando: 'Gerar apostila',
+        comando: Materiais.COMANDO_KIT,
         status: Agentes.STATUS_PEDIDO.pendente,
         detalhes: a.detalhes,
         ...(a.topicos.length ? { topicos: a.topicos } : {}),
       });
       // Só muda o dia depois que o pedido existe: se falhar no meio, o dia
       // continua como `📥 Pedir` e a próxima execução tenta de novo.
-      await N.atualizarPagina(a.diaId, { Apostila: N.prop.select(GERANDO) }, 'promoverPedidos');
+      await N.atualizarPagina(a.diaId, { [CAMPO_KIT]: N.prop.select(GERANDO) }, 'promoverPedidos');
       resultados.push({ ...a, pedidoUrl: pedido.url, acao: pedido.acao });
       promovidos += 1;
     }
@@ -714,8 +848,8 @@ async function promoverPedidos({ aplicar = false, registrarNoDiario = true } = {
       await N.registrarDiario({
         registro: `Pedidos promovidos do Cronograma · ${promovidos}`,
         tipo: 'Ajuste do Motor',
-        oQueFoiFeito: `${promovidos} dia(s) marcados "${PEDIR}" viraram pedido na Central de Comandos ` +
-          `e passaram a "${GERANDO}". A Central é agora a única fila de trabalho.`,
+        oQueFoiFeito: `${promovidos} dia(s) marcados "${PEDIR}" viraram pedido "${Materiais.COMANDO_KIT}" ` +
+          `na Central de Comandos e passaram a "${GERANDO}". A Central é a única fila de trabalho.`,
         ajustes: resultados.map((x) => `${x.data}: ${x.titulo}`).join('\n'),
       });
     }
@@ -854,7 +988,7 @@ async function atenderFila({ aplicar = false, displayId, limite = 10, fontes = F
 }
 
 module.exports = {
-  COMANDOS_CODE, PEDIR, GERANDO,
+  COMANDOS_CODE, PEDIR, GERANDO, CAMPO_KIT,
   INTENCOES, normalizar, interpretar, dataDosArgumentos,
   extrairIdTopico, extrairDataDoTexto,
   HANDLERS, FONTES_PADRAO, executar, respostaDesconhecida, SOCIAL, respostaSocial,

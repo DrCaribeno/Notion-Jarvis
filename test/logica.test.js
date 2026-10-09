@@ -10,7 +10,7 @@
 'use strict';
 
 const J = require('../index.js');
-const { N, Compromissos, Revisoes, Agentes } = J;
+const { N, Compromissos, Revisoes, Agentes, Materiais } = J;
 
 let passes = 0;
 const falhas = [];
@@ -235,6 +235,82 @@ eq(Agentes.sintetizarDiretriz(null, '❌ Inadequado').diretrizes, [], 'observaç
 
 const repetido = Agentes.sintetizarDiretriz('Ficou longo demais', '❌ Inadequado');
 eq(repetido.diretrizes, prolixo.diretrizes.slice(0, 1), 'mesma classe de observação gera a mesma diretriz');
+
+const sinais = Agentes.sintetizarDiretriz('Ignorou o que a professora enfatizou na aula', '⚠️ Parcial');
+ok(sinais.padroes.includes('sinais de prova'), 'reconhece falta de sinais de prova (sessão 6)');
+ok(sinais.diretrizes[0].includes('Sinais de prova'), 'e a diretriz manda preencher Sinais de prova');
+ok(!Agentes.TAXONOMIA.some((t) => /apostila/i.test(t.diretriz)), 'nenhuma diretriz da taxonomia fala mais em apostila');
+
+// ── I. Materiais da professora → kit, objetivos e consolidação ────
+grupo('I. Materiais · promoção, objetivos e consolidação (sessão 6)');
+eq(Materiais.COMANDO_KIT, 'Kit de estudo', 'o comando do kit tem o nome do select da Central');
+ok(Agentes.COMANDOS.includes(Materiais.COMANDO_KIT), 'e consta na lista de comandos aceitos');
+eq(Materiais.KIT.novo, '📥 Novo', 'estado de entrada bate com o schema de Materiais da Aula');
+eq(Materiais.KIT.pronto, '✅ Pronto', 'estado final idem');
+
+const m1 = { material: 'Aula 3 · Vias somatossensoriais', recebidoEm: '2026-10-13', tipo: 'Aula', encontro: 'Conf. 2' };
+eq(Materiais.tituloPedidoDoMaterial(m1), Materiais.tituloPedidoDoMaterial({ ...m1 }),
+  'título do pedido é determinístico (idempotência)');
+ok(Materiais.tituloPedidoDoMaterial(m1).startsWith('Kit de estudo · Aula 3'), 'título carrega o material');
+ok(Materiais.tituloPedidoDoMaterial(m1).includes('2026-10-13'), 'e a data, que o torna único');
+ok(Materiais.detalhesDoPedido(m1).includes('Conf. 2'), 'detalhes carregam o encontro');
+
+const ordem = Materiais.ordenarParaAtendimento([
+  { material: 'Slides', tipo: 'Slides', recebidoEm: '2026-10-10' },
+  { material: 'Aviso', tipo: 'Aviso', recebidoEm: '2026-10-09' },
+  { material: 'Problema', tipo: 'Problema do tutorial', recebidoEm: '2026-10-12' },
+  { material: 'Aula velha', tipo: 'Aula', recebidoEm: '2026-10-08' },
+  { material: 'Aula nova', tipo: 'Aula', recebidoEm: '2026-10-11' },
+]).map((m) => m.material);
+eq(ordem, ['Problema', 'Aula velha', 'Aula nova', 'Slides', 'Aviso'],
+  'problema do tutorial primeiro; dentro do tipo, o mais antigo primeiro');
+
+const hojeFixo = '2026-10-13';
+const materiais = [
+  { material: 'A', kit: '✅ Pronto', recebidoEm: '2026-10-12', processadoEm: '2026-10-13', objetivos: 'x', sinais: 's', exercicios: 8, flashcards: 12 },
+  { material: 'B', kit: '✅ Pronto', recebidoEm: '2026-09-01', processadoEm: '2026-09-02', objetivos: 'y' },
+  { material: 'C', kit: '📥 Novo', recebidoEm: '2026-10-13' },
+  { material: 'D', kit: '⏳ Gerando', recebidoEm: '2026-10-13' },
+];
+const o7 = Materiais.objetivosDeEstudo(materiais, { dias: 7, hoje: hojeFixo });
+eq(o7.desde, '2026-10-06', 'janela de 7 dias começa em 06/10');
+eq(o7.itens.map((i) => i.material), ['A'], 'só o kit pronto na janela');
+eq(o7.itens[0].sinais, 's', 'sinais de prova viajam junto');
+eq(o7.pendentes.map((p) => p.material), ['C', 'D'], 'pendentes = tudo que não está Pronto');
+eq(Materiais.objetivosDeEstudo(materiais, { dias: 60, hoje: hojeFixo }).itens.map((i) => i.material), ['A', 'B'],
+  'janela maior inclui o antigo, mais recente primeiro');
+eq(Materiais.objetivosDeEstudo([], { hoje: hojeFixo }).itens, [], 'lista vazia não quebra');
+
+const sug = (anki, idHumano = 'N03') => Materiais.sugestoesDeConsolidacao({ idHumano, anki }, { hoje: hojeFixo });
+eq(sug({}).map((s) => s.regra), ['sem cards'], 'sem cards → diz que não há dado, não inventa');
+eq(sug({ cards: 10, vistos: 10, consolidados: 6, lapsos: 0, revisoes: 20, retencao: 0.9, atualizadoEm: hojeFixo })
+  .map((s) => s.regra), ['consolidando'], 'tudo bom → consolidando, e só');
+const baixa = sug({ cards: 20, vistos: 20, consolidados: 2, lapsos: 1, revisoes: 12, retencao: 0.6, atualizadoEm: hojeFixo });
+eq(baixa[0].regra, 'retenção baixa', 'retenção baixa é a primeira sugestão');
+ok(baixa.some((s) => s.regra === 'manter o baralho'), 'e cobertura completa com pouca consolidação → manter o baralho');
+eq(sug({ cards: 20, vistos: 20, consolidados: 2, lapsos: 1, revisoes: 3, retencao: 0.6, atualizadoEm: hojeFixo })
+  .some((s) => s.regra === 'retenção baixa'), false, 'retenção com menos de 5 revisões não é lida (base insuficiente)');
+ok(sug({ cards: 20, vistos: 5, consolidados: 0, lapsos: 0, revisoes: 0, retencao: null, atualizadoEm: hojeFixo })
+  .some((s) => s.regra === 'cobertura'), 'poucos vistos → cobertura');
+ok(sug({ cards: 20, vistos: 20, consolidados: 12, lapsos: 7, revisoes: 30, retencao: 0.85, atualizadoEm: hojeFixo })
+  .some((s) => s.regra === 'lapsos'), 'lapsos ≥ 5 → cards grandes demais');
+eq(sug({ cards: 20, vistos: 20, consolidados: 12, revisoes: 30, retencao: 0.85, atualizadoEm: '2026-10-10' })[0].regra,
+  'sem sincronizar', 'sincronização com mais de 2 dias vem primeiro');
+eq(sug({ cards: 20, vistos: 20, consolidados: 12, revisoes: 30, retencao: 0.85, atualizadoEm: '2026-10-11' })
+  .some((s) => s.regra === 'sem sincronizar'), false, 'exatamente 2 dias ainda é aceitável');
+eq(JSON.stringify(baixa), JSON.stringify(sug({ cards: 20, vistos: 20, consolidados: 2, lapsos: 1, revisoes: 12, retencao: 0.6, atualizadoEm: hojeFixo })),
+  'sugestões são determinísticas');
+
+const resumo = Materiais.resumoDeConsolidacao([
+  { idHumano: 'F04', anki: { cards: 20, vistos: 20, consolidados: 2, lapsos: 1, revisoes: 12, retencao: 0.6, atualizadoEm: hojeFixo } },
+  { idHumano: 'F05', anki: { cards: 10, vistos: 10, consolidados: 6, revisoes: 20, retencao: 0.9, atualizadoEm: '2026-10-01' } },
+  { idHumano: 'K09', anki: {} },
+], { hoje: hojeFixo });
+eq(resumo.topicosComCards, 2, 'resumo conta tópicos com cards');
+eq(resumo.semCards, 1, 'e sem cards');
+eq(resumo.semSincronizar, 1, 'o aviso de sincronização é agregado, não repetido por tópico');
+eq(resumo.sugestoes[0].idHumano, 'F04', 'o urgente vem primeiro');
+ok(!resumo.sugestoes.some((s) => s.regra === 'sem sincronizar'), 'e não aparece como sugestão individual');
 
 // ── Resultado ─────────────────────────────────────────────────────
 console.log('\n' + '─'.repeat(62));

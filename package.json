@@ -11,7 +11,9 @@
     "otimizar": "node index.js otimizar",
     "ajuda": "node index.js ajuda",
     "code": "node index.js code",
-    "promover": "node index.js promover"
+    "promover": "node index.js promover",
+    "materiais": "node index.js materiais",
+    "objetivos": "node index.js materiais --objetivos"
   },
   "repository": {
     "type": "git",

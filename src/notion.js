@@ -23,7 +23,8 @@ const IDS = {
     motor: '3f24414dac76814f939ccc7e2b7cefcc',
     perfil: '3f24414dac7681adb316e534fb21dddd',
     indiceMateriais: '3f24414dac768103bd26ff0839c241b7',
-    skillGerarApostila: '3f24414dac768199a591e16b34590b22',
+    // Era "Gerar Apostila"; reescrita em 2026-10-09 como "Kit de estudo" (mesma página).
+    skillKitEstudo: '3f24414dac768199a591e16b34590b22',
     skillRotina5h: '3f24414dac7681f4b803fa4e7f5510e3',
     skillAnaliseSemanal: '3f24414dac7681a39f2accf2432eb736',
     blueprintAutomacao: '3f24414dac768129a7dcda035dec69e6',
@@ -40,6 +41,7 @@ const IDS = {
     compromissos: 'ebb4eacd50eb40249d20cc124a7078b6',       // criado em 2026-10-08
     auditoriaAgentes: '163ee7f987324454a8578e8e0760fb2a',     // criado em 2026-10-08
     terminalCode: 'e13980fc76b447cf824c5eebe584335d',         // criado em 2026-10-08
+    materiaisAula: '414957ec97894b56bb1e557174a0ab0a',        // criado em 2026-10-09 — o gatilho do estudo
   },
   /** data_source_id para a migração futura à API 2025-09-03 (ADR-002). */
   colecoes: {
@@ -54,6 +56,7 @@ const IDS = {
     compromissos: '1de67c6f-c1b3-49f3-a24a-2ed3fb8cc7f3',
     auditoriaAgentes: '8e7588a0-bdc9-4cba-96c3-070aadc93476',
     terminalCode: '7cdb5b46-1af5-4535-b4d3-129592c60bd9',
+    materiaisAula: 'b5ef6625-14df-4710-bda4-929dbd7b9141',
   },
   /**
    * Blocos nomeados dentro de páginas. Preenchidos quando o bloco é criado —
@@ -64,8 +67,13 @@ const IDS = {
     // Synced block do Hub onde o Code injeta as respostas. Criado em 2026-10-08.
     displayCode: '9d83ac917556430a92882008ff30cccf',
   },
-  /** Agente (opção de select na Auditoria) → página da skill a ser reescrita. */
+  /**
+   * Agente (opção de select na Auditoria) → página da skill a ser reescrita.
+   * "Gerar Apostila" e "Kit de estudo" apontam para a MESMA página: a skill
+   * foi reescrita em 2026-10-09, e auditorias antigas continuam resolvendo.
+   */
   agentes: {
+    'Kit de estudo': '3f24414dac768199a591e16b34590b22',
     'Gerar Apostila': '3f24414dac768199a591e16b34590b22',
     'Rotina diária das 5h': '3f24414dac7681f4b803fa4e7f5510e3',
     'Análise semanal': '3f24414dac7681a39f2accf2432eb736',
